@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flight Sim 26</title>
+  <meta name="description" content="A browser flight simulator with 21 aircraft, first-person cockpits, realistic physics, engine audio, weather, airports, emergencies and rescue.">
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- loading -->
+  <div id="loading" class="screen">
+    <h1 class="title">FLIGHT SIM <span>26</span></h1>
+    <div class="subtitle">Loading the world</div>
+    <div class="bar"><div id="loadbar"></div></div>
+    <div id="loadtext" class="muted small">Starting…</div>
+    <div id="loadtip" class="tip"></div>
+    <noscript><p>This simulator needs JavaScript and WebGL.</p></noscript>
+  </div>
+
+  <!-- in-flight HUD -->
+  <div id="hud" class="hidden">
+    <div id="fltinfo" class="hudbox"></div>
+    <div id="config" class="hudbox"></div>
+    <div id="fps" class="hudbox"></div>
+    <div id="viewname" class="hudbox"></div>
+    <div id="alerts"></div>
+    <div id="toast"></div>
+    <div id="atclog" class="hudbox hidden"></div>
+    <div id="atcpanel" class="hudbox hidden"></div>
+    <div id="mission" class="hudbox hidden"></div>
+    <div id="hints" class="hudbox hidden"></div>
+    <div id="appanel" class="hudbox hidden"></div>
+    <div id="training" class="hudbox hidden"></div>
+    <div id="emergency" class="hidden"></div>
+    <div id="help" class="panel hidden"></div>
+    <div id="crosshair" class="hidden"></div>
+    <div id="tooltip" class="hidden"></div>
+    <div id="replaybar" class="hudbox hidden"></div>
+  </div>
+  <div id="map" class="panel hidden"><canvas id="mapcanvas"></canvas><div class="legend">Moving map — scroll to zoom, M to close</div></div>
+
+  <!-- screens filled by the UI module -->
+  <div id="menu" class="screen hidden"></div>
+  <div id="dialog" class="screen hidden"></div>
+  <div id="pause" class="screen hidden"></div>
+  <div id="results" class="screen hidden"></div>
+
+  <script src="assets/audio/audiopack.js"></script>
+  <script src="dist/flightsim.js"></script>
+</body>
+</html>

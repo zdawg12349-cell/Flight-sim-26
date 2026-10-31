@@ -1,0 +1,17 @@
+{
+  "name": "flight-sim-26",
+  "version": "1.0.0",
+  "description": "Browser-based 3D flight simulator: 21 aircraft, first-person cockpits, physics, weather, airports, emergencies and rescue.",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --target=es2020 --minify --sourcemap --outfile=dist/flightsim.js",
+    "dev": "esbuild src/main.js --bundle --format=iife --target=es2020 --sourcemap --outfile=dist/flightsim.js --watch",
+    "serve": "node tools/serve.js",
+    "test": "node tests/run-tests.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "three": "0.170.0"
+  },
+  "license": "MIT"
+}
