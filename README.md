@@ -9,6 +9,14 @@ aircraft, missions, training and replays.
 > a commercial simulator. Engine sounds are GPL-2.0 recordings from FlightGear projects (see
 > [ATTRIBUTION.md](ATTRIBUTION.md)).
 
+## Screenshots
+
+| Flight deck from the jump seat (key 8), at night | Captain's seat at night |
+|---|---|
+| ![Jump seat view](docs/screenshots/flightdeck-jumpseat-night.jpg) | ![Pilot view at night](docs/screenshots/flightdeck-pilot-night.jpg) |
+| **Centre pedestal: thrust levers and twin CDUs** | **Backlit overhead panel** |
+| ![Pedestal](docs/screenshots/pedestal-night.jpg) | ![Overhead](docs/screenshots/overhead-night.jpg) |
+
 ## Starting it
 
 **Easiest:** open `index.html` in Chrome, Edge or Firefox (double-click it). The repository ships a
@@ -55,8 +63,15 @@ scipy, soundfile, imageio-ffmpeg).
 | ATC radio | Y or ` · Map: M · Help: H · Flight info: U · Pause: P · Menu: Esc |
 | Rescue hoist / cargo hook | K |
 
-A gamepad is supported. Simplified mode (the default) adds auto-rudder, auto-trim, stall
-protection and helicopter stability augmentation. Advanced mode gives raw controls.
+A gamepad is supported. Simplified mode (the default) adds:
+
+- auto-rudder, auto-trim and stall protection
+- ground-roll yaw damping, and holding a taildragger's stick back
+- releasing a forgotten parking brake when you add power
+- for helicopters, attitude stabilisation with a hands-off hover hold, auto anti-torque with
+  heading hold, and rotor-speed protection against over-pitching
+
+Advanced mode gives raw controls.
 
 ## What's in it
 
