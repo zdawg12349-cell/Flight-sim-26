@@ -283,6 +283,11 @@ class App {
         fm.placeOnGround(o.x, o.z, o.hdg);
       }
     }
+    // safety net: never start an airborne flight inside rising terrain
+    if (airborne) {
+      const gnd = this.world.surfaceAt(fm.pos.x, fm.pos.z);
+      if (fm.pos.y < gnd + 90) { fm.pos.y = gnd + 90; fm.prevPos.copy(fm.pos); }
+    }
     // engines / systems
     if (airborne || cfg.running) ac.systems.setRunning(airborne);
     else ac.systems.setColdAndDark();
@@ -440,6 +445,7 @@ class App {
     V('cameraPrev', (ac) => this.camRig.next(ac, -1));
     V('cockpitView', (ac) => this.camRig.setMode('cockpit', ac));
     V('cabinView', (ac) => this.camRig.setMode('cabin', ac));
+    V('jumpseatView', (ac) => this.camRig.setMode('jumpseat', ac));
     V('chaseView', (ac) => this.camRig.setMode('chase', ac));
     V('sideView', (ac) => this.camRig.setMode('side', ac));
     V('cinematicView', (ac) => this.camRig.setMode('cinematic', ac));
@@ -463,7 +469,7 @@ class App {
   }
 
   pickCockpit(nx, ny) {
-    if (!this.ac || this.camRig.effectiveMode !== 'cockpit') return null;
+    if (!this.ac || (this.camRig.effectiveMode !== 'cockpit' && this.camRig.effectiveMode !== 'jumpseat')) return null;
     const cam = this.renderer.camera;
     const near = cam.near;
     cam.near = 0.03; cam.updateProjectionMatrix();
@@ -575,7 +581,7 @@ class App {
     const cam = this.renderer.camera;
     if (!this.paused) {
       // look / knobs
-      const hovered = mouse.wheel && this.camRig.effectiveMode === 'cockpit' ? this.pickCockpit(input.mouse.nx, input.mouse.ny) : null;
+      const hovered = mouse.wheel && (this.camRig.effectiveMode === 'cockpit' || this.camRig.effectiveMode === 'jumpseat') ? this.pickCockpit(input.mouse.nx, input.mouse.ny) : null;
       if (hovered && hovered.userData.click && hovered.userData.click.onWheel) { hovered.userData.click.onWheel(mouse.wheel); this.ui.renderApPanel(); mouse.wheel = 0; }
       this.camRig.handleMouse(mouse, input.mouse.buttons);
       ac.applyInput(dt, input, false);
@@ -607,7 +613,8 @@ class App {
     this.updateWorld(dt, cam.position, ac.root.position);
     // instruments
     const d = ac.instrumentData(this.env, this.atc);
-    if (this.camRig.effectiveMode === 'cockpit' || this.camRig.effectiveMode === 'cabin') ac.cockpit.update(dt, d, performance.now() / 1000);
+    const em = this.camRig.effectiveMode;
+    if (em === 'cockpit' || em === 'jumpseat' || em === 'cabin') ac.cockpit.update(dt, d, performance.now() / 1000);
     if (this.highlightKind && ac.hasCockpit) for (const g of ac.cockpit.gauges) { const s = g.userData.kind === this.highlightKind ? 1 + 0.12 * Math.abs(Math.sin(performance.now() / 250)) : 1; g.scale.setScalar(s); }
     this.audio.update(dt, ac, cam, this.camRig.effectiveMode, this.weather);
     this.ui.updateHud(ac, this.camRig.effectiveMode, dt);

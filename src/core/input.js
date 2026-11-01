@@ -6,7 +6,7 @@ import { clamp } from './math.js';
 const EDGE_ACTIONS = new Set([
   'gear', 'flapsUp', 'flapsDown', 'parkingBrake', 'spoilers', 'reverse', 'autopilot', 'apPanel', 'engineStart', 'engineStop',
   'landingLights', 'allLights', 'cameraNext', 'cameraPrev', 'cockpitView', 'cabinView', 'chaseView', 'sideView', 'cinematicView',
-  'lookReset', 'map', 'hud', 'help', 'atc', 'pause', 'menu', 'throttleFull', 'throttleIdle', 'hoist',
+  'lookReset', 'jumpseatView', 'map', 'hud', 'help', 'atc', 'pause', 'menu', 'throttleFull', 'throttleIdle', 'hoist',
 ]);
 
 class Input {

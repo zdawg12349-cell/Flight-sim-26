@@ -67,6 +67,7 @@ export const DEFAULT_BINDINGS = {
   chaseView: ['Digit3'],
   sideView: ['Digit4'],
   cinematicView: ['Digit7'],
+  jumpseatView: ['Digit8'],
   lookReset: ['Space'],
   map: ['KeyM'],
   hud: ['KeyU'],
@@ -87,7 +88,7 @@ export const ACTION_LABELS = {
   autopilot: 'Autopilot master', apPanel: 'Autopilot panel', engineStart: 'Engine auto-start',
   engineStop: 'Engine shutdown', landingLights: 'Landing lights', allLights: 'Nav / beacon / strobe lights',
   cameraNext: 'Next camera', cameraPrev: 'Previous camera', cockpitView: 'Cockpit view', cabinView: 'Cabin view',
-  chaseView: 'Chase view', sideView: 'Side view', cinematicView: 'Cinematic view', lookReset: 'Reset view',
+  chaseView: 'Chase view', sideView: 'Side view', cinematicView: 'Cinematic view', jumpseatView: 'Flight deck (jump seat) view', lookReset: 'Reset view',
   map: 'Moving map', hud: 'Flight info overlay', help: 'Controls help', atc: 'ATC radio panel', pause: 'Pause',
   menu: 'Menu', hoist: 'Rescue hoist / cargo hook',
 };

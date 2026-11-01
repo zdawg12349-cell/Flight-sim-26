@@ -5,9 +5,11 @@ import { clamp, damp, lerp, DEG } from '../core/math.js';
 import { settings } from '../core/settings.js';
 import { AIRPORTS, toWorld } from '../world/airportData.js';
 
-export const VIEWS = ['cockpit', 'cabin', 'chase', 'orbit', 'side', 'tail', 'wing', 'tower', 'flyby', 'cinematic'];
-export const VIEW_LABELS = { cockpit: 'Cockpit', cabin: 'Passenger cabin', chase: 'Chase', orbit: 'Free orbit', side: 'Side', tail: 'Rear', wing: 'Wing', tower: 'Tower', flyby: 'Fly-by', cinematic: 'Cinematic' };
+export const VIEWS = ['cockpit', 'jumpseat', 'cabin', 'chase', 'orbit', 'side', 'tail', 'wing', 'tower', 'flyby', 'cinematic'];
+export const VIEW_LABELS = { cockpit: 'Cockpit', jumpseat: 'Flight deck (jump seat)', cabin: 'Passenger cabin', chase: 'Chase', orbit: 'Free orbit', side: 'Side', tail: 'Rear', wing: 'Wing', tower: 'Tower', flyby: 'Fly-by', cinematic: 'Cinematic' };
 
+const INSIDE = new Set(['cockpit', 'jumpseat', 'cabin']);
+const hasJumpseat = (ac) => !!(ac && (ac.model.desc.cockpit.seats || 1) >= 2);
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
 
 export class CameraRig {
@@ -32,26 +34,28 @@ export class CameraRig {
   setMode(m, ac) {
     if (!VIEWS.includes(m)) return;
     if (m === 'cabin' && !(ac && ac.model.desc.cabin)) m = 'chase';
+    if (m === 'jumpseat' && !hasJumpseat(ac)) m = 'cockpit';
     this.mode = m;
     this.chaseInit = false;
     this.flybyPos = null;
     if (m === 'cabin') { this.look.yaw = this.lookTarget.yaw = -80 * DEG; this.look.pitch = this.lookTarget.pitch = -8 * DEG; }
     if (m === 'cockpit') { this.look.yaw = this.lookTarget.yaw = 0; this.look.pitch = this.lookTarget.pitch = -8 * DEG; this.zoom = 1; }
+    if (m === 'jumpseat') { this.look.yaw = this.lookTarget.yaw = 0; this.look.pitch = this.lookTarget.pitch = -13 * DEG; this.zoom = 1; }
     const size = ac ? ac.fm.spec.dims.length : 20;
     this.orbit.dist = Math.max(12, size * 1.25);
   }
 
   next(ac, dir = 1) {
-    const list = VIEWS.filter((v) => v !== 'cabin' || (ac && ac.model.desc.cabin));
+    const list = VIEWS.filter((v) => (v !== 'cabin' || (ac && ac.model.desc.cabin)) && (v !== 'jumpseat' || hasJumpseat(ac)));
     const i = list.indexOf(this.mode);
     this.setMode(list[(i + dir + list.length) % list.length], ac);
   }
 
-  resetLook() { this.lookTarget.yaw = this.mode === 'cabin' ? -80 * DEG : 0; this.lookTarget.pitch = -8 * DEG; this.zoom = 1; this.orbit.yaw = 2.6; this.orbit.pitch = 0.18; }
+  resetLook() { this.lookTarget.yaw = this.mode === 'cabin' ? -80 * DEG : 0; this.lookTarget.pitch = (this.mode === 'jumpseat' ? -13 : -8) * DEG; this.zoom = 1; this.orbit.yaw = 2.6; this.orbit.pitch = 0.18; }
 
   handleMouse(m, buttons) {
     const sens = 0.0032 * settings.c.mouseSensitivity;
-    const inside = this.mode === 'cockpit' || this.mode === 'cabin';
+    const inside = INSIDE.has(this.mode);
     if (buttons) {
       if (inside) {
         this.lookTarget.yaw = clamp(this.lookTarget.yaw - m.dx * sens, -2.7, 2.7);
@@ -74,11 +78,11 @@ export class CameraRig {
     this.look.pitch = damp(this.look.pitch, this.lookTarget.pitch, 14, dt);
     const baseFov = settings.g.fov || 62;
     let fov = baseFov;
-    this.renderer.cockpitMode = mode === 'cockpit' || mode === 'cabin';
+    this.renderer.cockpitMode = INSIDE.has(mode);
     const size = fm.spec.dims.length;
     root.updateMatrixWorld();
-    if (mode === 'cockpit' || mode === 'cabin') {
-      const eye = mode === 'cabin' ? ac.cockpit.cabinEye : ac.cockpit.eye;
+    if (INSIDE.has(mode)) {
+      const eye = mode === 'cabin' ? ac.cockpit.cabinEye : mode === 'jumpseat' ? ac.cockpit.jumpEye : ac.cockpit.eye;
       // head motion: spring responding to body accelerations (g-forces, bumps, buffet)
       const acc = fm.accelBody;
       const target = _v2.set(-acc.x * 0.012, -(acc.y - 1) * 0.018, acc.z * 0.01);
@@ -161,7 +165,7 @@ export class CameraRig {
       fov = clamp(2 * Math.atan(size * 1.8 / dist) / DEG, 8, baseFov);
     }
     if (Math.abs(cam.fov - fov) > 0.05) { cam.fov = fov; cam.updateProjectionMatrix(); }
-    if (mode !== 'cockpit' && mode !== 'cabin') cam.near = 1.0;
+    if (!INSIDE.has(mode)) cam.near = 1.0;
     cam.updateMatrixWorld();
     this.effectiveMode = mode;
   }

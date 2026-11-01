@@ -7,7 +7,7 @@
     "build": "esbuild src/main.js --bundle --format=iife --target=es2020 --minify --sourcemap --legal-comments=eof --outfile=dist/flightsim.js",
     "dev": "esbuild src/main.js --bundle --format=iife --target=es2020 --sourcemap --outfile=dist/flightsim.js --watch",
     "serve": "node tools/serve.js",
-    "test": "node tests/physics-test.mjs warnings && node tests/physics-test.mjs ground && node tests/physics-test.mjs skylark && node tests/physics-test.mjs h22",
+    "test": "node tests/physics-test.mjs warnings && node tests/physics-test.mjs ground && node tests/physics-test.mjs approaches && node tests/physics-test.mjs skylark && node tests/physics-test.mjs h22",
     "test:browser": "node tests/feature-test.js test-output"
   },
   "devDependencies": {

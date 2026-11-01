@@ -230,7 +230,7 @@ export class AudioEngine {
     const step = 1 / 30;
     this.timer = step;
     const fm = ac.fm, prof = this.profile, t = fm.telemetry;
-    const inside = viewMode === 'cockpit' || viewMode === 'cabin';
+    const inside = viewMode === 'cockpit' || viewMode === 'jumpseat' || viewMode === 'cabin';
     const cabin = viewMode === 'cabin';
     const tNow = this.ctx.currentTime;
     // view mix

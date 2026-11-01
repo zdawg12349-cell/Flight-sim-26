@@ -46,12 +46,13 @@ async function main() {
     await E((a) => {
       const ac = window.__fs.ac, t0 = ac.fm.time, f = new Function('return (' + a.cond + ')()');
       window.__holdDone = false;
-      const prev = ac.applyInput;
+      const own = Object.prototype.hasOwnProperty.call(ac, 'applyInput') ? ac.applyInput : null;
+      const prev = ac.applyInput.bind(ac);
       ac.applyInput = (dt, inp, lock) => {
         if (!window.__holdDone && (f() || ac.fm.time - t0 > a.max)) {
           window.__holdDone = true;
           window.dispatchEvent(new KeyboardEvent('keyup', { code: a.key, key: a.key }));
-          ac.applyInput = prev;
+          if (own) ac.applyInput = own; else delete ac.applyInput;
         }
         return prev(dt, inp, lock);
       };

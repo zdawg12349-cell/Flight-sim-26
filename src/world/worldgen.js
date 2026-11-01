@@ -3,7 +3,7 @@
 // interpolation, fine detail noise and exact airport flattening analytically so that
 // physics and rendering agree.
 import { fbm, ridged, noise2, smoothstep, clamp, lerp, mulberry32 } from '../core/math.js';
-import { AIRPORTS, toWorld, frame, elevatedPlatforms } from './airportData.js';
+import { AIRPORTS, toWorld, frame, elevatedPlatforms, allRunwayEnds } from './airportData.js';
 
 export const WORLD_HALF = 40960;
 export const WORLD_SIZE = WORLD_HALF * 2;
@@ -103,6 +103,8 @@ export class World {
     this.h = new Float32Array(GRID_N * GRID_N);
     this.lc = new Uint8Array(GRID_N * GRID_N);
     this.zones = buildFlatZones();
+    // approach obstacle-clearance funnels, one per runway end (landing direction dx, dz)
+    this.funnels = allRunwayEnds().map(({ ap, end, dir }) => ({ x: end.x, z: end.z, dx: dir[0], dz: dir[1], elev: ap.elev }));
     this.platforms = elevatedPlatforms();
     this.lakes = LAKES.map((l) => ({ ...l, level: 0 }));
     this.towns = TOWNS;
@@ -163,6 +165,7 @@ export class World {
           const R = zn.ap.type === 'mountain' ? 2600 : 4200;
           if (d < R) h = lerp(zn.elev, h, smoothstep(R * 0.35, R, d));
         }
+        h = this._clearApproaches(x, z, h);
         // Rivers
         const dr = distToPolyline(x, z, RIVER);
         if (dr < 420) h -= 7 * (1 - smoothstep(60, 420, dr));
@@ -223,6 +226,25 @@ export class World {
     if (n > 0.18 || (h > 450 && n > -0.12) || slope > 0.22) return LC.FOREST;
     if (slope < 0.09 && h < 700) return (fbm(x / 1100, z / 1100, 2) > -0.25) ? LC.FARM : LC.GRASS;
     return LC.GRASS;
+  }
+
+  // Keeps every runway's final approach clear: inside a funnel that starts at the threshold and
+  // widens to ~2 km at 10 km out, terrain is held below a 2-degree surface (the 3-degree glide
+  // path stays well above it), blending smoothly into the surrounding landscape.
+  _clearApproaches(x, z, h) {
+    for (const f of this.funnels) {
+      const rx = x - f.x, rz = z - f.z;
+      if (rx > 13000 || rx < -13000 || rz > 13000 || rz < -13000) continue;
+      const s = -(rx * f.dx + rz * f.dz);                 // distance out along the approach
+      if (s < -60 || s > 12600) continue;
+      const lat = Math.abs(rx * -f.dz + rz * f.dx);
+      const halfW = 140 + Math.max(0, s) * 0.085;
+      const w = (1 - smoothstep(halfW, halfW + 420, lat)) * (1 - smoothstep(10000, 12600, s)) * smoothstep(-60, 60, s);
+      if (w <= 0) continue;
+      const cap = f.elev + 4 + Math.max(0, s) * 0.0349;
+      if (h > cap) h = lerp(h, cap, w);
+    }
+    return h;
   }
 
   // Weight (0..1) of airport flattening at a world position.
@@ -286,6 +308,7 @@ export class World {
     if (h > 0.5) {
       const amp = (3.5 + 4.5 * smoothstep(150, 400, h) + 14 * smoothstep(700, 1300, h)) * smoothstep(0.5, 8, h);
       h += amp * noise2(x / 520, z / 520) + amp * 0.3 * noise2(x / 140 + 3.3, z / 140 - 1.1);
+      h = this._clearApproaches(x, z, h);
     }
     return this._flatten(x, z, h);
   }

@@ -50,7 +50,7 @@ scipy, soundfile, imageio-ffmpeg).
 | Engine auto-start / shutdown | I / Shift+I |
 | Autopilot | Z (master), Shift+Z (panel). In the cockpit you can also click the MCP buttons and scroll its knobs |
 | Lights | L landing, Shift+L nav/beacon/strobe |
-| Views | V cockpit · 2 cabin · 3 chase · 4 side · 7 cinematic · C / Shift+C cycle · Space reset look |
+| Views | V cockpit · 8 flight deck (jump seat) · 2 cabin · 3 chase · 4 side · 7 cinematic · C / Shift+C cycle · Space reset look |
 | Look around | Drag the mouse (cockpit), scroll to zoom |
 | ATC radio | Y or ` · Map: M · Help: H · Flight info: U · Pause: P · Menu: Esc |
 | Rescue hoist / cargo hook | K |
@@ -111,7 +111,7 @@ or mixed panels. Common to all cockpits:
 At night the panels glow through emissive light maps instead of real lights, so lighting the
 cockpit adds no render cost. A passenger cabin view is available too. The cockpit is only
 built the first time you look inside, so flying from the outside views never pays for it.
-Settings → Gameplay → Start view lets you start in the chase camera.
+Settings → Gameplay → Start view lets you start in the chase camera. Press 8 for the jump-seat view, behind and between the pilots, which frames the whole flight deck.
 
 **Audio.** Layered real recordings with RPM-dependent pitch and throttle-dependent gain,
 start-up and shutdown, spool, propeller blade-pass and fan buzz-saw synthesis, rotor slap
@@ -183,8 +183,8 @@ node tests/physics-test.mjs skylark
 
 This runs a headless take-off and climb. Swap `skylark` for `m738` (airliner), `bushhawk`
 (taildragger), `h22` (hover and climb), `cg` (CG check for all aircraft), `ground` (every
-helicopter parked with the rotor turning) or `warnings` (no false cautions on any of the 21
-aircraft at spawn). `npm test` runs the quick set.
+helicopter parked with the rotor turning), `warnings` (no false cautions on any of the 21
+aircraft at spawn) or `approaches` (every runway's 3° glide path clears the terrain out to 6 nm). `npm test` runs the quick set.
 
 ```bash
 node tests/feature-test.js test-output

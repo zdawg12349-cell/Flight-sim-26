@@ -333,13 +333,13 @@ export class Aircraft {
     // damage visuals: smoke from failed/burning engines or damaged airframe
     this.updateSmoke(dt);
     // view-dependent visibility
-    const inside = viewMode === 'cockpit' || viewMode === 'cabin';
+    const inside = viewMode === 'cockpit' || viewMode === 'jumpseat' || viewMode === 'cabin';
     M.exterior.visible = !inside;
     const ck = inside ? this.cockpit : this._cockpit;       // builds on first inside view
     if (ck) {
       ck.group.visible = inside;
       ck.cabin.visible = viewMode === 'cabin';
-      if (ck.glass) ck.glass.visible = viewMode === 'cockpit';
+      if (ck.glass) ck.glass.visible = viewMode === 'cockpit' || viewMode === 'jumpseat';
     }
   }
 

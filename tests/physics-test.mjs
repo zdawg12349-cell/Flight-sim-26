@@ -122,7 +122,28 @@ function spawnWarnings() {
   if (bad.length) process.exitCode = 1;
 }
 
-if (which === 'cg') {} else if (which === 'warnings') spawnWarnings(); else if (which === 'ground') heliGround(); else if (['h22', 'h139', 'u205', 'r145', 'hl47'].includes(which)) heli(which); else fixedWing(which);
+// Every runway's straight-in 3-degree glide path must clear the terrain out to 6 nm.
+async function approaches() {
+  const { World } = await import('../src/world/worldgen.js');
+  const { allRunwayEnds } = await import('../src/world/airportData.js');
+  const w = new World();
+  await w.generate();
+  let ok = true;
+  for (const { ap, end, dir } of allRunwayEnds()) {
+    let minClr = 1e9, at = 0;
+    for (let s = 100; s <= 11500; s += 50) {
+      const x = end.x - dir[0] * s, z = end.z - dir[1] * s;
+      const clr = ap.elev + 15 + s * Math.tan(3 * DEG) - w.heightAt(x, z);
+      if (clr < minClr) { minClr = clr; at = s; }
+    }
+    const good = minClr > 10;
+    ok = ok && good;
+    console.log(`${good ? 'PASS' : 'FAIL'} ${ap.icao} RWY ${end.name}: lowest clearance under the glide path ${minClr.toFixed(0)} m (${at} m from threshold)`);
+  }
+  if (!ok) process.exitCode = 1;
+}
+
+if (which === 'cg') {} else if (which === 'approaches') await approaches(); else if (which === 'warnings') spawnWarnings(); else if (which === 'ground') heliGround(); else if (['h22', 'h139', 'u205', 'r145', 'hl47'].includes(which)) heli(which); else fixedWing(which);
 if (which === 'cg') {
   for (const id of Object.keys(AIRCRAFT_BY_ID)) {
     const { spec, fm } = make(id);

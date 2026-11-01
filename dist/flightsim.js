@@ -31764,6 +31764,7 @@ void main() {
     chaseView: ["Digit3"],
     sideView: ["Digit4"],
     cinematicView: ["Digit7"],
+    jumpseatView: ["Digit8"],
     lookReset: ["Space"],
     map: ["KeyM"],
     hud: ["KeyU"],
@@ -31806,6 +31807,7 @@ void main() {
     chaseView: "Chase view",
     sideView: "Side view",
     cinematicView: "Cinematic view",
+    jumpseatView: "Flight deck (jump seat) view",
     lookReset: "Reset view",
     map: "Moving map",
     hud: "Flight info overlay",
@@ -32062,6 +32064,7 @@ void main() {
     "sideView",
     "cinematicView",
     "lookReset",
+    "jumpseatView",
     "map",
     "hud",
     "help",
@@ -32959,6 +32962,17 @@ void main(){
       cz
     };
   }
+  function allRunwayEnds() {
+    const out = [];
+    for (const ap of AIRPORTS) {
+      for (const rw of ap.runways) {
+        const e = runwayEnds(ap, rw);
+        out.push({ ap, rw, end: e.a, other: e.b, dir: e.dir, cx: e.cx, cz: e.cz });
+        out.push({ ap, rw, end: e.b, other: e.a, dir: [-e.dir[0], -e.dir[1]], cx: e.cx, cz: e.cz });
+      }
+    }
+    return out;
+  }
   function elevatedPlatforms() {
     const out = [];
     for (const ap of AIRPORTS) {
@@ -32992,8 +33006,10 @@ void main(){
   }
 
   // src/render/camera.js
-  var VIEWS = ["cockpit", "cabin", "chase", "orbit", "side", "tail", "wing", "tower", "flyby", "cinematic"];
-  var VIEW_LABELS = { cockpit: "Cockpit", cabin: "Passenger cabin", chase: "Chase", orbit: "Free orbit", side: "Side", tail: "Rear", wing: "Wing", tower: "Tower", flyby: "Fly-by", cinematic: "Cinematic" };
+  var VIEWS = ["cockpit", "jumpseat", "cabin", "chase", "orbit", "side", "tail", "wing", "tower", "flyby", "cinematic"];
+  var VIEW_LABELS = { cockpit: "Cockpit", jumpseat: "Flight deck (jump seat)", cabin: "Passenger cabin", chase: "Chase", orbit: "Free orbit", side: "Side", tail: "Rear", wing: "Wing", tower: "Tower", flyby: "Fly-by", cinematic: "Cinematic" };
+  var INSIDE = /* @__PURE__ */ new Set(["cockpit", "jumpseat", "cabin"]);
+  var hasJumpseat = (ac) => !!(ac && (ac.model.desc.cockpit.seats || 1) >= 2);
   var _v = new Vector3();
   var _v22 = new Vector3();
   var _q = new Quaternion();
@@ -33019,6 +33035,7 @@ void main(){
     setMode(m, ac) {
       if (!VIEWS.includes(m)) return;
       if (m === "cabin" && !(ac && ac.model.desc.cabin)) m = "chase";
+      if (m === "jumpseat" && !hasJumpseat(ac)) m = "cockpit";
       this.mode = m;
       this.chaseInit = false;
       this.flybyPos = null;
@@ -33031,24 +33048,29 @@ void main(){
         this.look.pitch = this.lookTarget.pitch = -8 * DEG;
         this.zoom = 1;
       }
+      if (m === "jumpseat") {
+        this.look.yaw = this.lookTarget.yaw = 0;
+        this.look.pitch = this.lookTarget.pitch = -13 * DEG;
+        this.zoom = 1;
+      }
       const size = ac ? ac.fm.spec.dims.length : 20;
       this.orbit.dist = Math.max(12, size * 1.25);
     }
     next(ac, dir = 1) {
-      const list = VIEWS.filter((v) => v !== "cabin" || ac && ac.model.desc.cabin);
+      const list = VIEWS.filter((v) => (v !== "cabin" || ac && ac.model.desc.cabin) && (v !== "jumpseat" || hasJumpseat(ac)));
       const i = list.indexOf(this.mode);
       this.setMode(list[(i + dir + list.length) % list.length], ac);
     }
     resetLook() {
       this.lookTarget.yaw = this.mode === "cabin" ? -80 * DEG : 0;
-      this.lookTarget.pitch = -8 * DEG;
+      this.lookTarget.pitch = (this.mode === "jumpseat" ? -13 : -8) * DEG;
       this.zoom = 1;
       this.orbit.yaw = 2.6;
       this.orbit.pitch = 0.18;
     }
     handleMouse(m, buttons) {
       const sens = 32e-4 * settings.c.mouseSensitivity;
-      const inside = this.mode === "cockpit" || this.mode === "cabin";
+      const inside = INSIDE.has(this.mode);
       if (buttons) {
         if (inside) {
           this.lookTarget.yaw = clamp2(this.lookTarget.yaw - m.dx * sens, -2.7, 2.7);
@@ -33070,11 +33092,11 @@ void main(){
       this.look.pitch = damp2(this.look.pitch, this.lookTarget.pitch, 14, dt);
       const baseFov = settings.g.fov || 62;
       let fov2 = baseFov;
-      this.renderer.cockpitMode = mode === "cockpit" || mode === "cabin";
+      this.renderer.cockpitMode = INSIDE.has(mode);
       const size = fm.spec.dims.length;
       root.updateMatrixWorld();
-      if (mode === "cockpit" || mode === "cabin") {
-        const eye = mode === "cabin" ? ac.cockpit.cabinEye : ac.cockpit.eye;
+      if (INSIDE.has(mode)) {
+        const eye = mode === "cabin" ? ac.cockpit.cabinEye : mode === "jumpseat" ? ac.cockpit.jumpEye : ac.cockpit.eye;
         const acc = fm.accelBody;
         const target = _v22.set(-acc.x * 0.012, -(acc.y - 1) * 0.018, acc.z * 0.01);
         const k = 60, c = 11;
@@ -33163,7 +33185,7 @@ void main(){
         cam.fov = fov2;
         cam.updateProjectionMatrix();
       }
-      if (mode !== "cockpit" && mode !== "cabin") cam.near = 1;
+      if (!INSIDE.has(mode)) cam.near = 1;
       cam.updateMatrixWorld();
       this.effectiveMode = mode;
     }
@@ -33284,6 +33306,7 @@ void main(){
       this.h = new Float32Array(GRID_N * GRID_N);
       this.lc = new Uint8Array(GRID_N * GRID_N);
       this.zones = buildFlatZones();
+      this.funnels = allRunwayEnds().map(({ ap, end, dir }) => ({ x: end.x, z: end.z, dx: dir[0], dz: dir[1], elev: ap.elev }));
       this.platforms = elevatedPlatforms();
       this.lakes = LAKES.map((l) => ({ ...l, level: 0 }));
       this.towns = TOWNS;
@@ -33335,6 +33358,7 @@ void main(){
             const R2 = zn.ap.type === "mountain" ? 2600 : 4200;
             if (d < R2) h2 = lerp2(zn.elev, h2, smoothstep2(R2 * 0.35, R2, d));
           }
+          h2 = this._clearApproaches(x, z, h2);
           const dr = distToPolyline(x, z, RIVER);
           if (dr < 420) h2 -= 7 * (1 - smoothstep2(60, 420, dr));
           for (const l of this.lakes) {
@@ -33391,6 +33415,24 @@ void main(){
       if (n > 0.18 || h2 > 450 && n > -0.12 || slope > 0.22) return LC.FOREST;
       if (slope < 0.09 && h2 < 700) return fbm(x / 1100, z / 1100, 2) > -0.25 ? LC.FARM : LC.GRASS;
       return LC.GRASS;
+    }
+    // Keeps every runway's final approach clear: inside a funnel that starts at the threshold and
+    // widens to ~2 km at 10 km out, terrain is held below a 2-degree surface (the 3-degree glide
+    // path stays well above it), blending smoothly into the surrounding landscape.
+    _clearApproaches(x, z, h2) {
+      for (const f of this.funnels) {
+        const rx = x - f.x, rz = z - f.z;
+        if (rx > 13e3 || rx < -13e3 || rz > 13e3 || rz < -13e3) continue;
+        const s = -(rx * f.dx + rz * f.dz);
+        if (s < -60 || s > 12600) continue;
+        const lat = Math.abs(rx * -f.dz + rz * f.dx);
+        const halfW = 140 + Math.max(0, s) * 0.085;
+        const w = (1 - smoothstep2(halfW, halfW + 420, lat)) * (1 - smoothstep2(1e4, 12600, s)) * smoothstep2(-60, 60, s);
+        if (w <= 0) continue;
+        const cap = f.elev + 4 + Math.max(0, s) * 0.0349;
+        if (h2 > cap) h2 = lerp2(h2, cap, w);
+      }
+      return h2;
     }
     // Weight (0..1) of airport flattening at a world position.
     airportWeight(x, z) {
@@ -33449,6 +33491,7 @@ void main(){
       if (h2 > 0.5) {
         const amp = (3.5 + 4.5 * smoothstep2(150, 400, h2) + 14 * smoothstep2(700, 1300, h2)) * smoothstep2(0.5, 8, h2);
         h2 += amp * noise2(x / 520, z / 520) + amp * 0.3 * noise2(x / 140 + 3.3, z / 140 - 1.1);
+        h2 = this._clearApproaches(x, z, h2);
       }
       return this._flatten(x, z, h2);
     }
@@ -43472,6 +43515,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.desc = desc;
       this.layout = LAYOUTS[desc.cockpit.layout] || LAYOUTS.ga_analog;
       this.eye = new Vector3(...desc.cockpit.eye);
+      this.jumpEye = new Vector3(this.eye.x + (this.layout.panel.cx || 0), this.eye.y + 0.14, this.eye.z + 1.05);
       this.group = new Group();
       this.group.name = "cockpit";
       this.cabin = new Group();
@@ -43906,7 +43950,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     yoke(sx) {
       const P = this.layout.panel, eye = this.eye, L2 = this.layout;
       const big = this.spec.cat === "airliner" || this.spec.cat === "jet";
-      const wy = eye.y - (this.modern ? 0.42 : big ? 0.33 : 0.28), wz = eye.z - (big ? 0.5 : 0.45);
+      const wy = eye.y - (this.modern ? 0.42 : big ? 0.33 : 0.36), wz = eye.z - (big ? 0.5 : 0.45);
       const col = new Group();
       col.position.set(sx, wy, wz);
       this.group.add(col);
@@ -44833,13 +44877,13 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         this.landingLight.visible = !!want;
       }
       this.updateSmoke(dt);
-      const inside = viewMode === "cockpit" || viewMode === "cabin";
+      const inside = viewMode === "cockpit" || viewMode === "jumpseat" || viewMode === "cabin";
       M.exterior.visible = !inside;
       const ck = inside ? this.cockpit : this._cockpit;
       if (ck) {
         ck.group.visible = inside;
         ck.cabin.visible = viewMode === "cabin";
-        if (ck.glass) ck.glass.visible = viewMode === "cockpit";
+        if (ck.glass) ck.glass.visible = viewMode === "cockpit" || viewMode === "jumpseat";
       }
     }
     // ---------------------------------------------------------- smoke / fire particles (non-graphic, cheap)
@@ -45408,7 +45452,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       const step = 1 / 30;
       this.timer = step;
       const fm = ac.fm, prof = this.profile, t = fm.telemetry;
-      const inside = viewMode === "cockpit" || viewMode === "cabin";
+      const inside = viewMode === "cockpit" || viewMode === "jumpseat" || viewMode === "cabin";
       const cabin = viewMode === "cabin";
       const tNow = this.ctx.currentTime;
       const root = ac.root;
@@ -48997,6 +49041,13 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
           fm.placeOnGround(o.x, o.z, o.hdg);
         }
       }
+      if (airborne) {
+        const gnd = this.world.surfaceAt(fm.pos.x, fm.pos.z);
+        if (fm.pos.y < gnd + 90) {
+          fm.pos.y = gnd + 90;
+          fm.prevPos.copy(fm.pos);
+        }
+      }
       if (airborne || cfg.running) ac.systems.setRunning(airborne);
       else ac.systems.setColdAndDark();
       fm.ctl.parking = !airborne;
@@ -49232,6 +49283,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       V("cameraPrev", (ac) => this.camRig.next(ac, -1));
       V("cockpitView", (ac) => this.camRig.setMode("cockpit", ac));
       V("cabinView", (ac) => this.camRig.setMode("cabin", ac));
+      V("jumpseatView", (ac) => this.camRig.setMode("jumpseat", ac));
       V("chaseView", (ac) => this.camRig.setMode("chase", ac));
       V("sideView", (ac) => this.camRig.setMode("side", ac));
       V("cinematicView", (ac) => this.camRig.setMode("cinematic", ac));
@@ -49272,7 +49324,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       });
     }
     pickCockpit(nx, ny) {
-      if (!this.ac || this.camRig.effectiveMode !== "cockpit") return null;
+      if (!this.ac || this.camRig.effectiveMode !== "cockpit" && this.camRig.effectiveMode !== "jumpseat") return null;
       const cam = this.renderer.camera;
       const near = cam.near;
       cam.near = 0.03;
@@ -49396,7 +49448,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       if (!ac) return;
       const cam = this.renderer.camera;
       if (!this.paused) {
-        const hovered = mouse.wheel && this.camRig.effectiveMode === "cockpit" ? this.pickCockpit(input.mouse.nx, input.mouse.ny) : null;
+        const hovered = mouse.wheel && (this.camRig.effectiveMode === "cockpit" || this.camRig.effectiveMode === "jumpseat") ? this.pickCockpit(input.mouse.nx, input.mouse.ny) : null;
         if (hovered && hovered.userData.click && hovered.userData.click.onWheel) {
           hovered.userData.click.onWheel(mouse.wheel);
           this.ui.renderApPanel();
@@ -49432,7 +49484,8 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       if (this.landedRes && !this.paused) this.landedRes = this.landedRes;
       this.updateWorld(dt, cam.position, ac.root.position);
       const d = ac.instrumentData(this.env, this.atc);
-      if (this.camRig.effectiveMode === "cockpit" || this.camRig.effectiveMode === "cabin") ac.cockpit.update(dt, d, performance.now() / 1e3);
+      const em = this.camRig.effectiveMode;
+      if (em === "cockpit" || em === "jumpseat" || em === "cabin") ac.cockpit.update(dt, d, performance.now() / 1e3);
       if (this.highlightKind && ac.hasCockpit) for (const g of ac.cockpit.gauges) {
         const s = g.userData.kind === this.highlightKind ? 1 + 0.12 * Math.abs(Math.sin(performance.now() / 250)) : 1;
         g.scale.setScalar(s);

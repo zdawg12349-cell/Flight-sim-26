@@ -63,6 +63,8 @@ export class Cockpit {
     this.spec = spec; this.desc = desc;
     this.layout = LAYOUTS[desc.cockpit.layout] || LAYOUTS.ga_analog;
     this.eye = new THREE.Vector3(...desc.cockpit.eye);
+    // jump seat: behind and between the two pilots, framing the whole flight deck
+    this.jumpEye = new THREE.Vector3(this.eye.x + (this.layout.panel.cx || 0), this.eye.y + 0.14, this.eye.z + 1.05);
     this.group = new THREE.Group();
     this.group.name = 'cockpit';
     this.cabin = new THREE.Group();
@@ -467,7 +469,8 @@ export class Cockpit {
     const P = this.layout.panel, eye = this.eye, L = this.layout;
     const big = this.spec.cat === 'airliner' || this.spec.cat === 'jet';
     // wheel centre relative to the eye: roughly 30 degrees below the line of sight, ~0.5 m ahead
-    const wy = eye.y - (this.modern ? 0.42 : big ? 0.33 : 0.28), wz = eye.z - (big ? 0.5 : 0.45);
+    // (GA: the shaft enters the panel below the six-pack, as in a real trainer)
+    const wy = eye.y - (this.modern ? 0.42 : big ? 0.33 : 0.36), wz = eye.z - (big ? 0.5 : 0.45);
     const col = new THREE.Group();
     col.position.set(sx, wy, wz);
     this.group.add(col);
