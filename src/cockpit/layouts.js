@@ -9,6 +9,11 @@ const six = (x0, y0, s, gap = 0.012) => [
   { g: 'turn', x: x0, y: y0 - s - gap, s }, { g: 'hdg', x: x0 + s + gap, y: y0 - s - gap, s }, { g: 'vsi', x: x0 + 2 * (s + gap), y: y0 - s - gap, s },
 ];
 
+// A continuous row of large landscape displays centred on the aircraft centreline (cx is the
+// centreline position relative to the captain's eye), e.g. PFD | MFD | EICAS | MFD | PFD.
+const row = (kinds, cx, w, h, y = 0.07, gap = 0.022) => kinds.map((d, i) => ({ d, x: cx + (i - (kinds.length - 1) / 2) * (w + gap), y, w, h }));
+const DECK5 = ['pfd', 'nd', 'eicas', 'nd', 'pfd'];
+
 export const LAYOUTS = {
   // ---------------------------------------------------------------- general aviation
   ga_analog: {
@@ -19,7 +24,7 @@ export const LAYOUTS = {
       { g: 'rpm', x: 0.17, y: -0.05, s: 0.075, max: 3000, green: [2100, 2700], red: 2700 },
       { g: 'dual', x: 0.33, y: 0.09, s: 0.06, what: 'fuel' }, { g: 'dual', x: 0.33, y: 0.02, s: 0.06, what: 'oil' }, { g: 'dual', x: 0.33, y: -0.05, s: 0.06, what: 'cht' },
       { g: 'dual', x: 0.33, y: -0.12, s: 0.06, what: 'volt' },
-      { d: 'radio', x: 0.13, y: 0.075, w: 0.16, h: 0.12 },
+      { d: 'radio', x: 0.205, y: 0.08, w: 0.15, h: 0.11 },
       { g: 'clock', x: 0.47, y: 0.07, s: 0.06 },
     ],
     controls: { yoke: 'yoke', yokes: 2, throttle: 'knobs', flaps: 'switch', gear: null, switches: 'ga', key: true },
@@ -74,7 +79,7 @@ export const LAYOUTS = {
   },
   // ---------------------------------------------------------------- turboprops / jets
   turboprop: {
-    panel: { w: 1.36, h: 0.4, dist: 0.7, top: -0.1, tilt: 12, color: '#2e3136', cx: 0.36 },
+    panel: { w: 1.36, h: 0.4, dist: 0.7, top: -0.16, tilt: 12, color: '#2e3136', cx: 0.36 },
     glare: { depth: 0.22, color: '#18191b', mcp: true },
     items: [
       { d: 'pfd', x: -0.02, y: 0.03, w: 0.17, h: 0.17 }, { d: 'nd', x: -0.02, y: -0.15, w: 0.17, h: 0.12 },
@@ -89,41 +94,31 @@ export const LAYOUTS = {
     seatGap: 0.72, interior: '#5a5f66', floorDrop: 1.05,
   },
   regional_glass: {
-    panel: { w: 1.7, h: 0.4, dist: 0.74, top: -0.1, tilt: 12, color: '#3a4049', cx: 0.5 },
-    glare: { depth: 0.26, color: '#22262b', mcp: true },
-    items: [
-      { d: 'pfd', x: -0.03, y: 0.0, w: 0.2, h: 0.2 }, { d: 'nd', x: 0.2, y: 0.0, w: 0.2, h: 0.2 }, { d: 'eicas', x: 0.5, y: 0.0, w: 0.2, h: 0.2 },
-      { d: 'nd', x: 0.8, y: 0.0, w: 0.2, h: 0.2 }, { d: 'pfd', x: 1.03, y: 0.0, w: 0.2, h: 0.2 },
-      { d: 'standby', x: 0.5, y: -0.15, w: 0.07, h: 0.07 },
-    ],
+    modern: true,
+    panel: { w: 1.7, h: 0.44, dist: 0.74, top: -0.18, tilt: 12, color: '#2c323a', cx: 0.5 },
+    glare: { depth: 0.26, color: '#1b1f25', mcp: true },
+    items: [...row(DECK5, 0.5, 0.24, 0.185), { d: 'standby', x: 0.33, y: -0.12, w: 0.07, h: 0.07 }],
     controls: { yoke: 'yoke', yokes: 2, throttle: 'pedestal', levers: 2, condition: true, flaps: 'pedestal', gear: 'lever', switches: 'overhead' },
-    seatGap: 1.0, interior: '#6c727a', floorDrop: 1.08,
+    seatGap: 1.0, interior: '#3d444e', floorDrop: 1.08,
   },
   rj_glass: {
-    panel: { w: 1.75, h: 0.42, dist: 0.74, top: -0.1, tilt: 13, color: '#30353c', cx: 0.52 },
-    glare: { depth: 0.26, color: '#1e2226', mcp: true },
-    items: [
-      { d: 'pfd', x: -0.03, y: 0.0, w: 0.19, h: 0.22 }, { d: 'nd', x: 0.18, y: 0.0, w: 0.19, h: 0.22 },
-      { d: 'eicas', x: 0.52, y: 0.02, w: 0.2, h: 0.2 }, { d: 'eicas', x: 0.52, y: -0.2, w: 0.18, h: 0.14, page: 'sys' },
-      { d: 'nd', x: 0.86, y: 0.0, w: 0.19, h: 0.22 }, { d: 'pfd', x: 1.07, y: 0.0, w: 0.19, h: 0.22 },
-    ],
+    modern: true,
+    panel: { w: 1.75, h: 0.45, dist: 0.74, top: -0.18, tilt: 13, color: '#2b3139', cx: 0.52 },
+    glare: { depth: 0.26, color: '#1a1e24', mcp: true },
+    items: [...row(DECK5, 0.52, 0.25, 0.19), { d: 'standby', x: 0.34, y: -0.125, w: 0.07, h: 0.07 }],
     controls: { yoke: 'yoke', yokes: 2, throttle: 'pedestal', levers: 2, flaps: 'pedestal', gear: 'lever', switches: 'overhead', speedbrake: true },
-    seatGap: 1.04, interior: '#5c636c', floorDrop: 1.08,
+    seatGap: 1.04, interior: '#3b424c', floorDrop: 1.08,
   },
   nb_glass: {
-    panel: { w: 1.9, h: 0.44, dist: 0.76, top: -0.1, tilt: 14, color: '#3b4149', cx: 0.54 },
-    glare: { depth: 0.3, color: '#23272c', mcp: true },
-    items: [
-      { d: 'pfd', x: -0.04, y: 0.0, w: 0.21, h: 0.21 }, { d: 'nd', x: 0.2, y: 0.0, w: 0.21, h: 0.21 },
-      { d: 'eicas', x: 0.54, y: 0.02, w: 0.22, h: 0.22 }, { d: 'eicas', x: 0.54, y: -0.21, w: 0.2, h: 0.16, page: 'sys' },
-      { d: 'nd', x: 0.88, y: 0.0, w: 0.21, h: 0.21 }, { d: 'pfd', x: 1.12, y: 0.0, w: 0.21, h: 0.21 },
-      { d: 'standby', x: 0.37, y: 0.05, w: 0.06, h: 0.06 },
-    ],
+    modern: true,
+    panel: { w: 1.9, h: 0.46, dist: 0.76, top: -0.19, tilt: 14, color: '#2b3139', cx: 0.54 },
+    glare: { depth: 0.3, color: '#1b1f25', mcp: true },
+    items: [...row(DECK5, 0.54, 0.27, 0.205), { d: 'standby', x: 0.35, y: -0.13, w: 0.07, h: 0.07 }],
     controls: { yoke: 'yoke', yokes: 2, throttle: 'pedestal', levers: 2, flaps: 'pedestal', gear: 'lever', switches: 'overhead', speedbrake: true, fireHandles: true },
-    seatGap: 1.08, interior: '#69707a', floorDrop: 1.1,
+    seatGap: 1.08, interior: '#3c434d', floorDrop: 1.1,
   },
   classic_3crew: {
-    panel: { w: 1.85, h: 0.46, dist: 0.76, top: -0.1, tilt: 12, color: '#3c4a3e', cx: 0.55 },
+    panel: { w: 1.85, h: 0.46, dist: 0.76, top: -0.19, tilt: 12, color: '#3c4a3e', cx: 0.55 },
     glare: { depth: 0.28, color: '#232a24', mcp: true },
     items: [
       ...six(-0.13, 0.1, 0.09, 0.012),
@@ -138,29 +133,23 @@ export const LAYOUTS = {
     seatGap: 1.1, interior: '#56685a', floorDrop: 1.1,
   },
   wb_glass: {
-    panel: { w: 2.1, h: 0.42, dist: 0.8, top: -0.1, tilt: 14, color: '#2a2e33', cx: 0.62 },
-    glare: { depth: 0.32, color: '#1a1d20', mcp: true, hud: true },
-    items: [
-      { d: 'pfd', x: -0.05, y: 0.0, w: 0.27, h: 0.2 }, { d: 'nd', x: 0.25, y: 0.0, w: 0.27, h: 0.2 },
-      { d: 'eicas', x: 0.62, y: 0.0, w: 0.27, h: 0.2 },
-      { d: 'nd', x: 0.99, y: 0.0, w: 0.27, h: 0.2 }, { d: 'pfd', x: 1.29, y: 0.0, w: 0.27, h: 0.2 },
-    ],
+    modern: true,
+    panel: { w: 2.1, h: 0.46, dist: 0.8, top: -0.2, tilt: 14, color: '#2a3038', cx: 0.62 },
+    glare: { depth: 0.32, color: '#191d22', mcp: true, hud: true },
+    items: [...row(DECK5, 0.62, 0.3, 0.215), { d: 'standby', x: 0.42, y: -0.135, w: 0.075, h: 0.075 }],
     controls: { yoke: 'yoke', yokes: 2, throttle: 'pedestal', levers: 2, flaps: 'pedestal', gear: 'lever', switches: 'overhead', speedbrake: true, fireHandles: true },
-    seatGap: 1.24, interior: '#5d636b', floorDrop: 1.12,
+    seatGap: 1.24, interior: '#3a414b', floorDrop: 1.12,
   },
   jumbo_glass: {
-    panel: { w: 2.0, h: 0.44, dist: 0.78, top: -0.1, tilt: 13, color: '#3b4048', cx: 0.6 },
-    glare: { depth: 0.3, color: '#22262b', mcp: true },
-    items: [
-      { d: 'pfd', x: -0.05, y: 0.0, w: 0.21, h: 0.21 }, { d: 'nd', x: 0.19, y: 0.0, w: 0.21, h: 0.21 },
-      { d: 'eicas', x: 0.6, y: 0.03, w: 0.22, h: 0.22 }, { d: 'eicas', x: 0.6, y: -0.2, w: 0.2, h: 0.16, page: 'sys' },
-      { d: 'nd', x: 1.01, y: 0.0, w: 0.21, h: 0.21 }, { d: 'pfd', x: 1.25, y: 0.0, w: 0.21, h: 0.21 },
-    ],
+    modern: true,
+    panel: { w: 2.0, h: 0.46, dist: 0.78, top: -0.2, tilt: 13, color: '#2c323a', cx: 0.6 },
+    glare: { depth: 0.3, color: '#1b1f25', mcp: true },
+    items: [...row(DECK5, 0.6, 0.28, 0.21), { d: 'standby', x: 0.41, y: -0.135, w: 0.075, h: 0.075 }],
     controls: { yoke: 'yoke', yokes: 2, throttle: 'pedestal', levers: 4, flaps: 'pedestal', gear: 'lever', switches: 'overhead', speedbrake: true, fireHandles: true },
-    seatGap: 1.2, interior: '#6c727b', floorDrop: 1.12,
+    seatGap: 1.2, interior: '#3c434d', floorDrop: 1.12,
   },
   sst_classic: {
-    panel: { w: 1.5, h: 0.44, dist: 0.7, top: -0.12, tilt: 10, color: '#2f3640', cx: 0.5 },
+    panel: { w: 1.5, h: 0.44, dist: 0.7, top: -0.155, tilt: 10, color: '#2f3640', cx: 0.5 },
     glare: { depth: 0.2, color: '#1d2228', mcp: true },
     items: [
       ...six(-0.12, 0.09, 0.08, 0.012),
@@ -173,7 +162,7 @@ export const LAYOUTS = {
     seatGap: 1.0, interior: '#5b6370', floorDrop: 1.02,
   },
   vlj_glass: {
-    panel: { w: 1.22, h: 0.34, dist: 0.62, top: -0.08, tilt: 14, color: '#1b1c1f', cx: 0.34 },
+    panel: { w: 1.22, h: 0.34, dist: 0.62, top: -0.11, tilt: 14, color: '#1b1c1f', cx: 0.34 },
     glare: { depth: 0.18, color: '#111214', mcp: true },
     items: [
       { d: 'pfd', x: 0.0, y: 0.0, w: 0.27, h: 0.18 }, { d: 'mfd', x: 0.34, y: 0.0, w: 0.27, h: 0.18 }, { d: 'eicas', x: 0.68, y: 0.0, w: 0.27, h: 0.18 },
@@ -182,14 +171,12 @@ export const LAYOUTS = {
     seatGap: 0.68, interior: '#cfc8bb', floorDrop: 0.98,
   },
   bizjet_glass: {
-    panel: { w: 1.7, h: 0.42, dist: 0.74, top: -0.1, tilt: 14, color: '#262a2f', cx: 0.5 },
-    glare: { depth: 0.26, color: '#191b1e', mcp: true, hud: true },
-    items: [
-      { d: 'pfd', x: -0.03, y: 0.0, w: 0.25, h: 0.2 }, { d: 'nd', x: 0.25, y: 0.0, w: 0.25, h: 0.2 }, { d: 'eicas', x: 0.75, y: 0.0, w: 0.25, h: 0.2 },
-      { d: 'pfd', x: 1.03, y: 0.0, w: 0.25, h: 0.2 },
-    ],
+    modern: true,
+    panel: { w: 1.7, h: 0.44, dist: 0.74, top: -0.17, tilt: 14, color: '#262b31', cx: 0.5 },
+    glare: { depth: 0.26, color: '#17191d', mcp: true, hud: true },
+    items: [...row(['pfd', 'nd', 'eicas', 'pfd'], 0.5, 0.3, 0.2)],
     controls: { yoke: 'yoke', yokes: 2, throttle: 'pedestal', levers: 2, flaps: 'pedestal', gear: 'lever', switches: 'overhead', speedbrake: true, fireHandles: true },
-    seatGap: 1.0, interior: '#d0c7b8', floorDrop: 1.05,
+    seatGap: 1.0, interior: '#c9c1b4', floorDrop: 1.05,
   },
   fighter: {
     panel: { w: 0.62, h: 0.3, dist: 0.62, top: -0.16, tilt: 8, color: '#2c3034', cx: 0 },
@@ -215,8 +202,8 @@ export const LAYOUTS = {
     seatGap: 0.62, interior: '#8a8a88', floorDrop: 0.95,
   },
   heli_glass: {
-    panel: { w: 1.4, h: 0.36, dist: 0.7, top: -0.15, tilt: 18, color: '#25282c', cx: -0.48 },
-    glare: { depth: 0.2, color: '#17191b', mcp: true },
+    panel: { w: 1.4, h: 0.36, dist: 0.7, top: -0.21, tilt: 18, color: '#2c3036', cx: -0.48 },
+    glare: { depth: 0.12, color: '#17191b', mcp: true },
     items: [
       { d: 'pfd', x: -0.0, y: 0.0, w: 0.2, h: 0.2 }, { d: 'eicas', x: 0.24, y: 0.0, w: 0.2, h: 0.2 }, { d: 'nd', x: 0.72, y: 0.0, w: 0.2, h: 0.2 }, { d: 'pfd', x: 0.96, y: 0.0, w: 0.2, h: 0.2 },
       { d: 'standby', x: 0.48, y: 0.05, w: 0.07, h: 0.07 },
@@ -225,7 +212,7 @@ export const LAYOUTS = {
     seatGap: 0.96, interior: '#53585e', floorDrop: 1.0,
   },
   heli_utility: {
-    panel: { w: 1.25, h: 0.36, dist: 0.7, top: -0.18, tilt: 16, color: '#1f2322', cx: -0.55 },
+    panel: { w: 1.25, h: 0.36, dist: 0.7, top: -0.22, tilt: 16, color: '#262b29', cx: -0.55 },
     glare: { depth: 0.18, color: '#141716' },
     items: [
       { g: 'asi', x: -0.08, y: 0.08, s: 0.085 }, { g: 'adi', x: 0.02, y: 0.08, s: 0.095 }, { g: 'alt', x: 0.12, y: 0.08, s: 0.085 },
@@ -238,8 +225,8 @@ export const LAYOUTS = {
     seatGap: 1.1, interior: '#3e4642', floorDrop: 1.0,
   },
   heli_rescue: {
-    panel: { w: 1.1, h: 0.34, dist: 0.66, top: -0.16, tilt: 18, color: '#24272b', cx: -0.42 },
-    glare: { depth: 0.16, color: '#16181a', mcp: true },
+    panel: { w: 1.1, h: 0.34, dist: 0.66, top: -0.21, tilt: 18, color: '#2b2f34', cx: -0.42 },
+    glare: { depth: 0.11, color: '#16181a', mcp: true },
     items: [
       { d: 'pfd', x: 0.0, y: 0.0, w: 0.19, h: 0.19 }, { d: 'eicas', x: 0.42, y: 0.0, w: 0.19, h: 0.19 }, { d: 'nd', x: 0.84, y: 0.0, w: 0.19, h: 0.19 },
       { d: 'standby', x: 0.21, y: 0.05, w: 0.06, h: 0.06 },
@@ -248,8 +235,8 @@ export const LAYOUTS = {
     seatGap: 0.84, interior: '#5a5f63', floorDrop: 0.98,
   },
   heli_heavy: {
-    panel: { w: 1.5, h: 0.4, dist: 0.74, top: -0.16, tilt: 14, color: '#2b302c', cx: -0.55 },
-    glare: { depth: 0.22, color: '#1b1f1c', mcp: true },
+    panel: { w: 1.5, h: 0.4, dist: 0.74, top: -0.2, tilt: 14, color: '#323833', cx: -0.55 },
+    glare: { depth: 0.15, color: '#1b1f1c', mcp: true },
     items: [
       { d: 'pfd', x: 0.0, y: 0.02, w: 0.19, h: 0.19 }, { d: 'nd', x: 0.22, y: 0.02, w: 0.19, h: 0.19 },
       { d: 'eicas', x: 0.55, y: 0.02, w: 0.2, h: 0.2 },

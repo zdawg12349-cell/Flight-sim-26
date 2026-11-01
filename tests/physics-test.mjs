@@ -7,7 +7,7 @@ import { Systems } from '../src/sim/systems.js';
 import { KT, FT, FPM, DEG } from '../src/core/math.js';
 
 const world = { surfaceAt: () => 0, heightAt: () => 0, normalAt: (x, z, o) => o.set(0, 1, 0), isWater: () => false };
-const weather = { tempOffset: 0, qnh: 1013.25, wetness: 0, snowCover: 0, precip: 0, inCloud: 0, windAt: (p, t, o) => o.set(0, 0, 0), turbRates: null };
+const weather = { tempOffset: 0, qnh: 1013.25, wetness: 0, snowCover: 0, precip: 0, inCloud: 0, windAt: (p, t, o) => o.set(0, 0, 0), turbRates: null, icing: 0, oat: 15 };
 
 function make(id) {
   const spec = AIRCRAFT_BY_ID[id];
@@ -46,7 +46,7 @@ function fixedWing(id, opts = {}) {
     const pe = targetPitch - tl.pitch;
     fm.ctl.pitch = Math.max(-1, Math.min(1, pe * 0.08 - fm.w.x / DEG * 0.06));
     fm.ctl.roll = Math.max(-1, Math.min(1, -tl.bank * 0.05 + fm.w.z / DEG * 0.02));
-    fm.ctl.yaw = Math.max(-1, Math.min(1, (tl.heading - 90) * -0.05));
+    fm.ctl.yaw = Math.max(-1, Math.min(1, (tl.heading - 90) * -0.05 + (fm.onGround ? fm.w.y * 2.2 : 0)));
     fm.step(dt, sys);
     if (!liftoff && !fm.onGround && tl.agl > 2) liftoff = t;
     if (liftoff && !gearUp && t - liftoff > 4) { fm.ctl.gearDown = 0; gearUp = true; fm.ctl.flapIndex = 0; }
@@ -89,7 +89,40 @@ function heli(id) {
 }
 
 const which = process.argv[2] || 'skylark';
-if (which === 'cg') {} else if (['h22', 'h139', 'u205', 'r145', 'hl47'].includes(which)) heli(which); else fixedWing(which);
+// Helicopters parked with engines running, rotor at 100 %, collective down: must stay put.
+function heliGround() {
+  let ok = true;
+  for (const id of ['h22', 'h139', 'u205', 'r145', 'hl47']) {
+    const { fm, sys } = make(id);
+    fm.setLoad(0.6, 0.6);
+    fm.placeOnGround(0, 0, 90);
+    sys.setRunning(false);
+    fm.ctl.collective = 0; fm.ctl.parking = true;
+    for (let i = 0; i < 120 * 10; i++) fm.step(1 / 120, sys);
+    const t = fm.telemetry;
+    const drift = Math.hypot(fm.pos.x, fm.pos.z), dh = Math.abs(t.heading - 90);
+    const good = fm.onGround && !fm.damage.crashed && drift < 0.3 && dh < 3 && Math.abs(t.bank) < 2;
+    ok = ok && good;
+    console.log(`${good ? 'PASS' : 'FAIL'} ${id}: after 10 s drift ${drift.toFixed(2)} m, heading change ${dh.toFixed(1)} deg, bank ${t.bank.toFixed(1)}, rotor ${(fm.nr * 100).toFixed(0)} %`);
+  }
+  if (!ok) process.exitCode = 1;
+}
+
+// Every aircraft spawned with engines running must show no caution/warning messages.
+function spawnWarnings() {
+  const bad = [];
+  for (const id of Object.keys(AIRCRAFT_BY_ID)) {
+    const { fm, sys } = make(id);
+    fm.setLoad(0.6, 0.6); fm.placeOnGround(0, 0, 90); sys.setRunning(false); fm.ctl.parking = true;
+    const seen = new Set();
+    for (let i = 0; i < 120 * 6; i++) { sys.update(1 / 120, weather); fm.step(1 / 120, sys); for (const k of sys.warnings.keys()) seen.add(k); }
+    if (seen.size) bad.push(id + ': ' + [...seen].join(','));
+  }
+  console.log(bad.length ? 'FAIL spawn warnings: ' + bad.join(' | ') : `PASS no warnings for ${Object.keys(AIRCRAFT_BY_ID).length} aircraft during 6 s after spawn`);
+  if (bad.length) process.exitCode = 1;
+}
+
+if (which === 'cg') {} else if (which === 'warnings') spawnWarnings(); else if (which === 'ground') heliGround(); else if (['h22', 'h139', 'u205', 'r145', 'hl47'].includes(which)) heli(which); else fixedWing(which);
 if (which === 'cg') {
   for (const id of Object.keys(AIRCRAFT_BY_ID)) {
     const { spec, fm } = make(id);

@@ -13,6 +13,7 @@ const V3 = () => new THREE.Vector3();
 const _v1 = V3(), _v2 = V3(), _v3 = V3(), _v4 = V3(), _v5 = V3(), _v6 = V3();
 const _q1 = new THREE.Quaternion(), _qi = new THREE.Quaternion();
 const _n = V3();
+const _s1 = V3(), _s2 = V3(), _s3 = V3();
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class FlightModel {
@@ -113,6 +114,16 @@ export class FlightModel {
     this.wingY = this.desc.wings ? this.desc.wings[0].root[1] : 0;
   }
 
+  // Dynamic-pressure increase over the tail from propeller slipstream. Momentum theory gives a
+  // total-pressure rise of T/A in the fully developed wake; only part of the tail is immersed
+  // (nose-mounted single engine: most of it; wing-mounted twins: very little).
+  slipstreamQ() {
+    if (!this.propAircraft) return 0;
+    let q = 0;
+    for (const e of this.engines) if (e.A > 0) q += Math.max(0, e.thrust) / e.A;
+    return q * (this.engines.length === 1 ? 0.4 : 0.08);
+  }
+
   flapInfo() {
     const f = this.spec.aero.flaps;
     const d = this.flapDeg;
@@ -181,7 +192,8 @@ export class FlightModel {
       if (g.name.startsWith('body')) share = 0.9 / nMain;
       const stat = heavy ? 0.2 : this.isHeli ? 0.06 : 0.08;
       this.contacts.push({
-        name: g.name, p: new THREE.Vector3(g.pos[0] + (g.offsetX || 0), gY, g.pos[2]), kind: 'wheel', gear: i,
+        // contact at the bottom of this wheel (a tailwheel sits much higher than the mains)
+        name: g.name, p: new THREE.Vector3(g.pos[0] + (g.offsetX || 0), Number.isFinite(g.len) && Number.isFinite(g.r) ? g.pos[1] - g.len - g.r : gY, g.pos[2]), kind: 'wheel', gear: i,
         k: mg * share / stat, share, travel, steer: !!g.steer, brake: !isNose || this.isHeli, nose: isNose, radius: g.r, compression: 0, wow: false,
       });
     });
@@ -208,6 +220,31 @@ export class FlightModel {
     }
     for (const c of this.contacts) c.p.sub(this.cg);
     this.groundOffset = this.desc.groundY - this.cg.y;     // wheel bottom relative to CG
+    // spring rates from the real static load split (lever arms about the CG), so every gear leg
+    // compresses by its design static stroke and the aircraft sits at the correct attitude
+    if (!this.isHeli) {
+      const wh = this.contacts.filter((c) => c.kind === 'wheel');
+      const front = wh.filter((c) => c.nose);
+      const mains = wh.filter((c) => !c.nose);
+      if (front.length && mains.length) {
+        const zf = front.reduce((t, c) => t + c.p.z, 0) / front.length;
+        const zm = mains.reduce((t, c) => t + c.p.z, 0) / mains.length;
+        const ff = clamp(zm / (zm - zf), 0.03, 0.45);
+        const stat = heavy ? 0.2 : 0.08;
+        for (const c of front) { c.share = ff / front.length; c.k = mg * c.share / stat; }
+        for (const c of mains) { c.share = (1 - ff) / mains.length; c.k = mg * c.share / stat; }
+      }
+    }
+    // static ground attitude: taildraggers rest nose-high on mains + tailwheel (three-point attitude)
+    this.groundPitch = 0;
+    const wheels = this.contacts.filter((c) => c.kind === 'wheel');
+    const tail = wheels.find((c) => c.name === 'tail');
+    if (tail) {
+      const main = wheels.filter((c) => c !== tail).reduce((m, c) => (c.p.y < m.p.y ? c : m));
+      this.groundPitch = Math.atan2(tail.p.y - main.p.y, tail.p.z - main.p.z);
+      const th = this.groundPitch;
+      this.groundOffset = main.p.y * Math.cos(th) - main.p.z * Math.sin(th);
+    }
   }
 
   // ------------------------------------------------------------ helicopter setup
@@ -235,7 +272,7 @@ export class FlightModel {
   // ------------------------------------------------------------ placement
   placeOnGround(x, z, hdgDeg, groundHeight = null) {
     const h = groundHeight ?? this.world.surfaceAt(x, z);
-    this.q.setFromAxisAngle(UP, -hdgDeg * DEG);
+    this.q.setFromEuler(new THREE.Euler(this.groundPitch || 0, -hdgDeg * DEG, 0, 'YXZ'));
     this.pos.set(x, h - this.groundOffset + 0.02, z);
     this.vel.set(0, 0, 0); this.w.set(0, 0, 0);
     this.prevPos.copy(this.pos); this.prevQ.copy(this.q);
@@ -402,7 +439,16 @@ export class FlightModel {
   // ------------------------------------------------------------ fixed wing aero
   fixedWingForces(dt, atm, vb, V, mach) {
     const a = this.spec.aero;
-    if (V < 0.3) { this.alpha = 0; this.beta = 0; this.cl = 0; return; }
+    const qs = this.slipstreamQ();
+    if (V < 2) {
+      // essentially stationary: only the propeller slipstream acts on elevator and rudder
+      this.alpha = 0; this.beta = 0; this.cl = 0; this.qbar = 0.5 * atm.rho * V * V;
+      if (qs > 1) {
+        this.torque.x += qs * a.S * a.c * a.Cmde * 0.4 * -this.elevator * (1 - this.damage.tail * 0.5);
+        this.torque.y += -qs * a.S * a.b * a.Cndr * 0.44 * -this.rudder * (1 - this.damage.tail * 0.4);
+      }
+      return;
+    }
     const u = -vb.z, vSide = vb.x, wDown = -vb.y;
     const alpha = Math.atan2(wDown, Math.max(Math.abs(u), 0.1) * Math.sign(u || 1));
     const beta = Math.asin(clamp(vSide / V, -1, 1));
@@ -437,12 +483,7 @@ export class FlightModel {
     this.stallWarn = alpha > 0 ? smoothstep(4 * DEG, 0.5 * DEG, stallMargin) : 0;
     this.stalled = alpha > as + 1 * DEG;
     // control effectiveness (prop slipstream boosts tail at low speed)
-    let qCtl = qbar;
-    if (this.propAircraft) {
-      const T = this.engines.reduce((s2, e) => s2 + Math.max(0, e.thrust), 0);
-      qCtl += T / (S * 0.55) * 0.5 * (this.engines.length === 1 ? 1 : 0.4);
-    }
-    const ctlK = qCtl / Math.max(qbar, 1);
+    const ctlK = (qbar + qs) / Math.max(qbar, 1);
     const stallK = this.stalled ? 0.65 : 1;
     // pitch moment
     const de = -this.elevator;    // + = trailing edge down
@@ -532,14 +573,20 @@ export class FlightModel {
       const mu = vIn / Math.max(OR, 1);
       const lc = vAx / Math.max(OR, 1);               // climb inflow ratio
       // iterate inflow
-      let lam = this.lambda;
+      // Solve g(lam) = (lam - lc) - Ct(lam) / (2 sqrt(mu^2 + lam^2 + eps)) = 0 with a guarded Newton
+      // iteration (plain fixed-point iteration oscillates near zero thrust, where momentum theory is
+      // singular, and produced spurious thrust spikes at flat pitch).
+      const k0 = this.sigma * 5.7 / 2, thK = th / 3 * (1 + 1.5 * mu * mu);
+      let lam = Number.isFinite(this.lambda) ? this.lambda : 0.05;
       let Ct = 0;
-      for (let it = 0; it < 6; it++) {
-        Ct = (this.sigma * 5.7 / 2) * (th / 3 * (1 + 1.5 * mu * mu) - lam / 2);
-        const li = Ct / (2 * Math.sqrt(mu * mu + lam * lam) + 1e-4);
-        const lnew = lc + Math.max(-0.2, li);
-        lam = lam + (lnew - lam) * 0.5;
+      for (let it = 0; it < 8; it++) {
+        Ct = k0 * (thK - lam / 2);
+        const S = Math.sqrt(mu * mu + lam * lam + 1e-4);
+        const g = (lam - lc) - Ct / (2 * S);
+        const dg = Math.max(0.3, 1 + (k0 / 2 * S + Ct * lam / S) / (2 * S * S));
+        lam -= clamp(g / dg, -0.04, 0.04);
       }
+      Ct = k0 * (thK - lam / 2);
       this.lambda = lam;
       Ct = Math.max(-0.002, Ct);
       // ground effect
@@ -651,6 +698,8 @@ export class FlightModel {
     const steerMax = (this.spec.steerDeg || 0) * DEG * clamp(1.2 - speed / 18, 0.12, 1);
     this.steer = damp(this.steer, this.ctl.yaw * steerMax, 6, dt);
     const brakeAmt = this.ctl.parking ? 1 : 0;
+    // static (stick-slip) friction only while essentially stopped
+    const lowSpeed = speed < 1.0 && this.w.length() < 0.6;
     let lowest = 1e9;
     for (const ct of this.contacts) {
       ct.wow = false;
@@ -684,7 +733,8 @@ export class FlightModel {
       if (water) {
         F.addScaledVector(vC, -Math.min(Fn * 0.8, this.mass * 2) / Math.max(1, vC.length()));
       } else if (ct.kind === 'wheel') {
-        const st = ct.steer ? this.steer : 0;
+        // a steerable wheel behind the CG (tailwheel) must turn the opposite way to a nosewheel
+        const st = ct.steer ? this.steer * (ct.p.z > 0 ? -1 : 1) : 0;
         const fwd = _v5.set(Math.sin(st), 0, -Math.cos(st)).applyQuaternion(this.q);
         fwd.addScaledVector(n, -fwd.dot(n)).normalize();
         const side = _v6.copy(n).cross(fwd);
@@ -696,15 +746,27 @@ export class FlightModel {
         }
         if (!ct.brake) brake = 0;
         const muB = fr.mu * (this.spec.brake ? this.spec.brake / 0.45 : 1) * 0.85;
-        const Flong = -(fr.roll + brake * muB) * Fn * Math.tanh(vl / 0.35);
-        const Flat = -fr.mu * 0.9 * Fn * Math.tanh(vs / 0.22);
-        F.addScaledVector(fwd, Flong).addScaledVector(side, Flat);
+        if (lowSpeed) {
+          // parked / creeping: tyres stick laterally (and longitudinally when braked)
+          const braked = brake > 0.5;
+          this.stick(ct, P, vC, n, Fn, braked ? null : fwd, (braked ? Math.max(fr.mu * 0.9, muB) : fr.mu * 0.9), F);
+          if (!braked) F.addScaledVector(fwd, -(fr.roll + brake * muB) * Fn * Math.tanh(vl / 0.35));
+        } else {
+          ct.anc = null;
+          const Flong = -(fr.roll + brake * muB) * Fn * Math.tanh(vl / 0.35);
+          const Flat = -fr.mu * 0.9 * Fn * Math.tanh(vs / 0.22);
+          F.addScaledVector(fwd, Flong).addScaledVector(side, Flat);
+        }
         ct.rollSpeed = vl;
       } else {
-        const mu = ct.kind === 'skid' ? 0.42 : 0.5;
+        const mu = (ct.kind === 'skid' ? 0.42 : 0.5) * Math.min(1, fr.mu / 0.8 + 0.25);
         const vt = _v5.copy(vC).addScaledVector(n, -vn);
         const vtl = vt.length();
-        if (vtl > 1e-4) F.addScaledVector(vt, -mu * Fn * Math.tanh(vtl / 0.2) / vtl);
+        if (ct.kind === 'skid' && lowSpeed) this.stick(ct, P, vC, n, Fn, null, mu, F);
+        else {
+          ct.anc = null;
+          if (vtl > 1e-4) F.addScaledVector(vt, -mu * Fn * Math.tanh(vtl / 0.2) / vtl);
+        }
         if (ct.kind === 'scrape' || ct.kind === 'rotor') this.scrape(ct, vtl, dpen, dt);
       }
       this.force.add(F);
@@ -724,6 +786,31 @@ export class FlightModel {
       this.evaluateImpact(maxImpact, wheelsOn);
     }
     if (!any) this.lastVs = this.vel.y;
+  }
+
+  // Stick-slip friction: the contact is tied to an anchor on the ground by a stiff spring-damper;
+  // when the required force exceeds mu*Fn the anchor slides. freeDir (optional) is a direction in
+  // which the contact may roll freely (an unbraked wheel).
+  stick(ct, P, vC, n, Fn, freeDir, mu, F) {
+    if (!ct.anc) ct.anc = new THREE.Vector3().copy(P);
+    const d = _s1.copy(P).sub(ct.anc);
+    d.addScaledVector(n, -d.dot(n));
+    const vt = _s2.copy(vC).addScaledVector(n, -vC.dot(n));
+    if (freeDir) {
+      const dl = d.dot(freeDir);
+      ct.anc.addScaledVector(freeDir, dl);
+      d.addScaledVector(freeDir, -dl);
+      vt.addScaledVector(freeDir, -vt.dot(freeDir));
+    }
+    const mC = this.mass * clamp(ct.share || 0.25, 0.1, 0.5);
+    const ks = mC * 250, cs = 2 * 0.5 * Math.sqrt(ks * mC);
+    const Fs = _s3.copy(d).multiplyScalar(-ks).addScaledVector(vt, -cs);
+    const lim = mu * Fn, L = Fs.length();
+    if (L > lim && L > 1e-9) {
+      Fs.multiplyScalar(lim / L);
+      ct.anc.copy(P).addScaledVector(_s1.copy(Fs).addScaledVector(vt, cs).multiplyScalar(1 / ks), 1);
+    }
+    F.add(Fs);
   }
 
   evaluateImpact(vImpact, wheels) {

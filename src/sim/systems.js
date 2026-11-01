@@ -43,6 +43,10 @@ export class Systems {
     Object.assign(this.lights, { nav: true, beacon: true, strobe: airborne, landing: airborne, taxi: !airborne, logo: true });
     for (const e of this.fm.engines) e.setRunningInstant(15);
     this.busVolts = 28;
+    this.hydPressure = this.hydFail ? 0 : 3000;
+    this.genOnline = this.fm.engines.map(() => true);
+    this.warnings.clear(); this.masterWarning = false; this.masterCaution = false;
+    this.fm.hydraulic = 1;
     if (this.fm.isHeli) { this.fm.omega = this.fm.omegaN; for (const e of this.fm.engines) if (e.flight !== undefined) e.flight = 1; }
   }
 

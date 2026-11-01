@@ -31837,6 +31837,7 @@ void main() {
         crashDetection: true,
         startEnginesRunning: true,
         atcText: true,
+        startView: "cockpit",
         assists: { autoRudder: true, autoTrim: true, stallProtection: true, heliStability: true, autoMixture: true }
       },
       last: { aircraft: "skylark", airport: "KPXR", spawn: "runway", weather: "clear", time: 10.5, season: "summer" },
@@ -35233,8 +35234,8 @@ void main(){
   function signAtlas(signs) {
     const c = makeCanvas(1024, 1024), x = c.getContext("2d");
     signs.forEach((s, i) => {
-      const col = i % 4, row = Math.floor(i / 4);
-      const X = col * 256, Y = row * 64;
+      const col = i % 4, row2 = Math.floor(i / 4);
+      const X = col * 256, Y = row2 * 64;
       x.fillStyle = s.kind === "hold" ? "#c3161c" : s.kind === "loc" ? "#111" : "#f2c200";
       x.fillRect(X, Y, 256, 64);
       x.fillStyle = s.kind === "hold" ? "#fff" : s.kind === "loc" ? "#f2c200" : "#111";
@@ -35449,10 +35450,10 @@ void main(){
         this.nightMats.push(sm);
         const sb = new Batch();
         signs.forEach((s, i) => {
-          const col = i % 4, row = Math.floor(i / 4);
+          const col = i % 4, row2 = Math.floor(i / 4);
           const box = new BoxGeometry(2.6, 0.75, 0.25);
           const uv = box.attributes.uv;
-          for (let k = 0; k < uv.count; k++) uv.setXY(k, (col + uv.getX(k)) / 4, 1 - (row + 1 - uv.getY(k)) / 16);
+          for (let k = 0; k < uv.count; k++) uv.setXY(k, (col + uv.getX(k)) / 4, 1 - (row2 + 1 - uv.getY(k)) / 16);
           sb.addAt("sign", box, s.x, 0.85, s.z, -s.hdg);
           sb.addAt("legs", new BoxGeometry(2.2, 0.5, 0.1), s.x, 0.25, s.z, -s.hdg);
         });
@@ -36414,14 +36415,23 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     return g;
   }
   function projectDir(shape, eye, az, el) {
+    const P = hitPoint(shape, eye, az, el);
+    const s = shape.at(P[2]);
+    const sx = Math.sign(P[0]) * Math.pow(Math.min(1, Math.abs(P[0]) / Math.max(1e-3, s.w)), s.e / 2);
+    const cy = -Math.sign(P[1] - s.y) * Math.pow(Math.min(1, Math.abs(P[1] - s.y) / Math.max(1e-3, s.h)), s.e / 2);
+    let th = Math.atan2(sx, cy);
+    if (th < 0) th += 2 * PI;
+    return [P[2], th];
+  }
+  function hitPoint(shape, eye, az, el) {
     const a = az * PI / 180, e = el * PI / 180;
     const dx = Math.sin(a) * Math.cos(e), dy = Math.sin(e), dz = -Math.cos(a) * Math.cos(e);
     let t0 = 0, t1 = 0, P = [eye[0], eye[1], eye[2]];
     const inside = (x, y, z) => {
       if (z < shape.zNose || z > shape.zTail) return false;
-      const s2 = shape.at(z);
-      if (s2.w < 0.02 || s2.h < 0.02) return false;
-      return Math.pow(Math.abs(x) / s2.w, s2.e) + Math.pow(Math.abs(y - s2.y) / s2.h, s2.e) < 1;
+      const s = shape.at(z);
+      if (s.w < 0.02 || s.h < 0.02) return false;
+      return Math.pow(Math.abs(x) / s.w, s.e) + Math.pow(Math.abs(y - s.y) / s.h, s.e) < 1;
     };
     for (let t2 = 0.02; t2 < 12; t2 += 0.03) {
       if (!inside(eye[0] + dx * t2, eye[1] + dy * t2, eye[2] + dz * t2)) {
@@ -36438,17 +36448,26 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     }
     const t = (t0 + t1) / 2;
     P = [eye[0] + dx * t, eye[1] + dy * t, Math.max(shape.zNose, Math.min(shape.zTail, eye[2] + dz * t))];
-    const s = shape.at(P[2]);
-    const sx = Math.sign(P[0]) * Math.pow(Math.min(1, Math.abs(P[0]) / Math.max(1e-3, s.w)), s.e / 2);
-    const cy = -Math.sign(P[1] - s.y) * Math.pow(Math.min(1, Math.abs(P[1] - s.y) / Math.max(1e-3, s.h)), s.e / 2);
-    let th = Math.atan2(sx, cy);
-    if (th < 0) th += 2 * PI;
-    return [P[2], th];
+    return P;
+  }
+  function azToCentre(shape, eye, el, halfPost) {
+    let lo = -10, hi = 75;
+    for (let k = 0; k < 24; k++) {
+      const m = (lo + hi) / 2;
+      if (hitPoint(shape, eye, m, el)[0] < -halfPost) lo = m;
+      else hi = m;
+    }
+    return (lo + hi) / 2;
   }
   function projectRect(shape, eye, r) {
-    const [a0, a1] = r.az, [e0, e1] = r.el;
+    const [a0, a1r] = r.az, [e0, e1] = r.el;
+    const a1 = a1r;
     const tp = (r.taper || 0) * (a1 - a0) / 2;
     const corners = [[a0, e0], [a1, e0], [a1 - tp, e1], [a0 + tp, e1]];
+    if (r.post !== void 0 && eye[0] < 0) {
+      corners[1][0] = azToCentre(shape, eye, e0, r.post);
+      corners[2][0] = azToCentre(shape, eye, e1, r.post);
+    }
     const poly = [];
     for (let i = 0; i < 4; i++) {
       const [ax, ay] = corners[i], [bx, by] = corners[(i + 1) % 4];
@@ -36465,15 +36484,15 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     gaHighRoof: [{ c: true, az: [-58, 58], el: [-13, 20], taper: 0.1 }, { az: [-118, -62], el: [-34, 22] }, { az: [-152, -124], el: [-18, 15] }, { c: true, az: [-22, 22], el: [40, 70] }],
     gaLow: [{ c: true, az: [-58, 58], el: [-12, 25], taper: 0.12 }, { az: [-120, -62], el: [-22, 32] }, { az: [-152, -126], el: [-12, 18] }],
     vlj: [{ c: true, az: [-58, 58], el: [-11, 22], taper: 0.15 }, { az: [-112, -63], el: [-18, 24] }, { az: [-150, -118], el: [-10, 14] }],
-    commuter: [{ az: [-46, -3], el: [-12, 16], taper: 0.08 }, { az: [-95, -50], el: [-18, 12] }],
-    airliner: [{ az: [-37, -2], el: [-15, 17], taper: 0.1 }, { az: [-72, -41], el: [-16, 13] }, { az: [-104, -76], el: [-13, 9] }],
-    regional: [{ az: [-40, -2], el: [-15, 16], taper: 0.08 }, { az: [-75, -44], el: [-17, 12] }, { az: [-104, -79], el: [-13, 9] }],
-    bizjet: [{ az: [-40, -2], el: [-13, 17], taper: 0.1 }, { az: [-82, -44], el: [-16, 12] }],
-    sst: [{ az: [-24, -2], el: [-8, 9] }, { az: [-62, -28], el: [-10, 8] }],
+    commuter: [{ az: [-46, -3], el: [-12, 16], taper: 0.08, post: 0.035 }, { az: [-95, -50], el: [-18, 12] }],
+    airliner: [{ az: [-37, -2], el: [-15, 17], taper: 0.1, post: 0.04 }, { az: [-72, -41], el: [-16, 13] }, { az: [-104, -76], el: [-13, 9] }],
+    regional: [{ az: [-40, -2], el: [-15, 16], taper: 0.08, post: 0.04 }, { az: [-75, -44], el: [-17, 12] }, { az: [-104, -79], el: [-13, 9] }],
+    bizjet: [{ az: [-40, -2], el: [-13, 17], taper: 0.1, post: 0.035 }, { az: [-82, -44], el: [-16, 12] }],
+    sst: [{ az: [-24, -2], el: [-8, 9], post: 0.05 }, { az: [-62, -28], el: [-10, 8] }],
     heliBubble: [{ c: true, az: [-82, 82], el: [-62, 42], taper: 0.25 }, { az: [-142, -86], el: [-48, 30] }],
     heliGlass: [{ c: true, az: [-62, 62], el: [-24, 28], taper: 0.12 }, { c: true, az: [-38, 38], el: [-68, -30] }, { az: [-128, -66], el: [-42, 22] }],
     heliUtility: [{ c: true, az: [-64, 64], el: [-24, 30], taper: 0.12 }, { c: true, az: [-40, 40], el: [-70, -30] }, { az: [-130, -68], el: [-44, 24] }, { c: true, az: [-26, 26], el: [36, 62] }],
-    heliHeavy: [{ az: [-50, -3], el: [-28, 22] }, { az: [-100, -54], el: [-36, 16] }, { az: [-40, -6], el: [-66, -33] }]
+    heliHeavy: [{ az: [-50, -3], el: [-28, 22], post: 0.04 }, { az: [-100, -54], el: [-36, 16] }, { az: [-40, -6], el: [-66, -33] }]
   };
   function glazing(kind) {
     return (shape, eye) => {
@@ -37039,12 +37058,12 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     if (wnd) {
       x.fillStyle = wnd.color || "#1a2229";
       for (const side of [1, -1]) {
-        for (const row of wnd.rows || [{ th: wnd.th, z0: wnd.z0, z1: wnd.z1 }]) {
-          const th = side > 0 ? Math.PI / 2 + row.th : TAU - Math.PI / 2 - row.th;
+        for (const row2 of wnd.rows || [{ th: wnd.th, z0: wnd.z0, z1: wnd.z1 }]) {
+          const th = side > 0 ? Math.PI / 2 + row2.th : TAU - Math.PI / 2 - row2.th;
           const cy = Y(th);
           const hpx = wnd.h / (2 * Math.PI * (L2.radius || 2)) * H;
           const wpx = wnd.w / shape.length * W;
-          for (let z = row.z0; z <= row.z1; z += wnd.pitch) {
+          for (let z = row2.z0; z <= row2.z1; z += wnd.pitch) {
             if (wnd.skip && wnd.skip.some(([a, b]) => z > a && z < b)) continue;
             const px2 = X(z);
             x.beginPath();
@@ -37362,7 +37381,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       ],
       gear: airlinerGear({ yAttach: -2.6, zNose: -25.3, noseLen: gl(-2.6, 0.62, G2), noseR: 0.62, xMain: 5.7, zMain: 0.4, mainLen: gl(-2.6, 0.62, G2), mainR: 0.62, mainWheels: 4, bogie: 1.5, bodyGear: { x: 1.85, z: 3.6 } }),
       lights: { ...tipLights(W), tail: [0, 1.4, 39.3], beaconTop: [0, 5.9, -14], beaconBottom: [0, -3.4, 2], landing: [[-4, -2.4, -10.1], [4, -2.4, -10.1]] },
-      cockpit: { eye: [-0.6, 3.7, -25], layout: "jumbo_glass", seats: 2 },
+      cockpit: { eye: [-0.6, 3, -24.8], layout: "jumbo_glass", seats: 2 },
       cabin: { z0: -22, z1: 30, rows: 46, abreast: [3, 4, 3], aisle: 0.5, eye: [2.3, 0.4, 2], floorY: -1.7 },
       groundY: G2
     };
@@ -39014,9 +39033,11 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.roughPhase = Math.random() * 10;
       this.extinguished = false;
     }
+    // engine already running at idle (spawn with engines running / airborne): oil pressure established
     setRunningInstant(oat) {
       this.running = true;
       this.state = "running";
+      this.oilP = (this.oilPmax || 60) * 0.72;
     }
     fail(type) {
       this.failed = type;
@@ -39290,6 +39311,8 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     setRunningInstant() {
       super.setRunningInstant();
       this.omega = 800 / 60 * 2 * Math.PI;
+      this.rpm = this.visRpm = 800;
+      this.n1 = this.n2 = 800 / this.rpmMax;
       this.oilT = 60;
       this.cht = 140;
       this.egt = 600;
@@ -39470,6 +39493,8 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.egt = 620;
       this.fuelCutoff = false;
       this.crankRpm = 0;
+      this.rpm = this.visRpm = this.rpmMax;
+      this.n1 = this.n2 = 1;
     }
     spinFrac() {
       return clamp2(this.rpm / this.rpmMax, 0, 1.2);
@@ -39598,6 +39623,9 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
   var _q12 = new Quaternion();
   var _qi = new Quaternion();
   var _n = V3();
+  var _s1 = V3();
+  var _s2 = V3();
+  var _s3 = V3();
   var UP = new Vector3(0, 1, 0);
   var FlightModel = class {
     constructor(spec, desc, world, weather) {
@@ -39728,6 +39756,15 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.propAircraft = this.spec.engines.type === "piston" || this.spec.engines.type === "turboprop";
       this.wingY = this.desc.wings ? this.desc.wings[0].root[1] : 0;
     }
+    // Dynamic-pressure increase over the tail from propeller slipstream. Momentum theory gives a
+    // total-pressure rise of T/A in the fully developed wake; only part of the tail is immersed
+    // (nose-mounted single engine: most of it; wing-mounted twins: very little).
+    slipstreamQ() {
+      if (!this.propAircraft) return 0;
+      let q = 0;
+      for (const e of this.engines) if (e.A > 0) q += Math.max(0, e.thrust) / e.A;
+      return q * (this.engines.length === 1 ? 0.4 : 0.08);
+    }
     flapInfo() {
       const f = this.spec.aero.flaps;
       const d = this.flapDeg;
@@ -39792,8 +39829,9 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         if (g.name.startsWith("body")) share = 0.9 / nMain;
         const stat2 = heavy ? 0.2 : this.isHeli ? 0.06 : 0.08;
         this.contacts.push({
+          // contact at the bottom of this wheel (a tailwheel sits much higher than the mains)
           name: g.name,
-          p: new Vector3(g.pos[0] + (g.offsetX || 0), gY, g.pos[2]),
+          p: new Vector3(g.pos[0] + (g.offsetX || 0), Number.isFinite(g.len) && Number.isFinite(g.r) ? g.pos[1] - g.len - g.r : gY, g.pos[2]),
           kind: "wheel",
           gear: i,
           k: mg * share / stat2,
@@ -39829,6 +39867,34 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       }
       for (const c of this.contacts) c.p.sub(this.cg);
       this.groundOffset = this.desc.groundY - this.cg.y;
+      if (!this.isHeli) {
+        const wh = this.contacts.filter((c) => c.kind === "wheel");
+        const front = wh.filter((c) => c.nose);
+        const mains = wh.filter((c) => !c.nose);
+        if (front.length && mains.length) {
+          const zf = front.reduce((t, c) => t + c.p.z, 0) / front.length;
+          const zm = mains.reduce((t, c) => t + c.p.z, 0) / mains.length;
+          const ff = clamp2(zm / (zm - zf), 0.03, 0.45);
+          const stat2 = heavy ? 0.2 : 0.08;
+          for (const c of front) {
+            c.share = ff / front.length;
+            c.k = mg * c.share / stat2;
+          }
+          for (const c of mains) {
+            c.share = (1 - ff) / mains.length;
+            c.k = mg * c.share / stat2;
+          }
+        }
+      }
+      this.groundPitch = 0;
+      const wheels = this.contacts.filter((c) => c.kind === "wheel");
+      const tail = wheels.find((c) => c.name === "tail");
+      if (tail) {
+        const main = wheels.filter((c) => c !== tail).reduce((m, c) => c.p.y < m.p.y ? c : m);
+        this.groundPitch = Math.atan2(tail.p.y - main.p.y, tail.p.z - main.p.z);
+        const th = this.groundPitch;
+        this.groundOffset = main.p.y * Math.cos(th) - main.p.z * Math.sin(th);
+      }
     }
     // ------------------------------------------------------------ helicopter setup
     initHeli() {
@@ -39860,7 +39926,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     // ------------------------------------------------------------ placement
     placeOnGround(x, z, hdgDeg, groundHeight = null) {
       const h2 = groundHeight ?? this.world.surfaceAt(x, z);
-      this.q.setFromAxisAngle(UP, -hdgDeg * DEG);
+      this.q.setFromEuler(new Euler(this.groundPitch || 0, -hdgDeg * DEG, 0, "YXZ"));
       this.pos.set(x, h2 - this.groundOffset + 0.02, z);
       this.vel.set(0, 0, 0);
       this.w.set(0, 0, 0);
@@ -40025,10 +40091,16 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     // ------------------------------------------------------------ fixed wing aero
     fixedWingForces(dt, atm, vb, V, mach) {
       const a = this.spec.aero;
-      if (V < 0.3) {
+      const qs = this.slipstreamQ();
+      if (V < 2) {
         this.alpha = 0;
         this.beta = 0;
         this.cl = 0;
+        this.qbar = 0.5 * atm.rho * V * V;
+        if (qs > 1) {
+          this.torque.x += qs * a.S * a.c * a.Cmde * 0.4 * -this.elevator * (1 - this.damage.tail * 0.5);
+          this.torque.y += -qs * a.S * a.b * a.Cndr * 0.44 * -this.rudder * (1 - this.damage.tail * 0.4);
+        }
         return;
       }
       const u = -vb.z, vSide = vb.x, wDown = -vb.y;
@@ -40060,12 +40132,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       const stallMargin = as - alpha;
       this.stallWarn = alpha > 0 ? smoothstep2(4 * DEG, 0.5 * DEG, stallMargin) : 0;
       this.stalled = alpha > as + 1 * DEG;
-      let qCtl = qbar;
-      if (this.propAircraft) {
-        const T2 = this.engines.reduce((s2, e) => s2 + Math.max(0, e.thrust), 0);
-        qCtl += T2 / (S2 * 0.55) * 0.5 * (this.engines.length === 1 ? 1 : 0.4);
-      }
-      const ctlK = qCtl / Math.max(qbar, 1);
+      const ctlK = (qbar + qs) / Math.max(qbar, 1);
       const stallK = this.stalled ? 0.65 : 1;
       const de = -this.elevator;
       let Cm = this.Cm0 + a.Cma * alpha + a.Cmq * qh + a.Cmde * 0.4 * de * ctlK * stallK + fl.dCm + CL * this.cgShift;
@@ -40143,14 +40210,17 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         const vIn = Math.sqrt(Math.max(0, vHub.lengthSq() - vAx * vAx));
         const mu = vIn / Math.max(OR, 1);
         const lc = vAx / Math.max(OR, 1);
-        let lam2 = this.lambda;
+        const k0 = this.sigma * 5.7 / 2, thK = th / 3 * (1 + 1.5 * mu * mu);
+        let lam2 = Number.isFinite(this.lambda) ? this.lambda : 0.05;
         let Ct = 0;
-        for (let it = 0; it < 6; it++) {
-          Ct = this.sigma * 5.7 / 2 * (th / 3 * (1 + 1.5 * mu * mu) - lam2 / 2);
-          const li = Ct / (2 * Math.sqrt(mu * mu + lam2 * lam2) + 1e-4);
-          const lnew = lc + Math.max(-0.2, li);
-          lam2 = lam2 + (lnew - lam2) * 0.5;
+        for (let it = 0; it < 8; it++) {
+          Ct = k0 * (thK - lam2 / 2);
+          const S2 = Math.sqrt(mu * mu + lam2 * lam2 + 1e-4);
+          const g = lam2 - lc - Ct / (2 * S2);
+          const dg = Math.max(0.3, 1 + (k0 / 2 * S2 + Ct * lam2 / S2) / (2 * S2 * S2));
+          lam2 -= clamp2(g / dg, -0.04, 0.04);
         }
+        Ct = k0 * (thK - lam2 / 2);
         this.lambda = lam2;
         Ct = Math.max(-2e-3, Ct);
         const z = Math.max(0.2, agl + (hubs[k][1] - this.groundOffset));
@@ -40246,6 +40316,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       const steerMax = (this.spec.steerDeg || 0) * DEG * clamp2(1.2 - speed / 18, 0.12, 1);
       this.steer = damp2(this.steer, this.ctl.yaw * steerMax, 6, dt);
       const brakeAmt = this.ctl.parking ? 1 : 0;
+      const lowSpeed = speed < 1 && this.w.length() < 0.6;
       let lowest = 1e9;
       for (const ct of this.contacts) {
         ct.wow = false;
@@ -40287,7 +40358,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         if (water) {
           F.addScaledVector(vC, -Math.min(Fn * 0.8, this.mass * 2) / Math.max(1, vC.length()));
         } else if (ct.kind === "wheel") {
-          const st = ct.steer ? this.steer : 0;
+          const st = ct.steer ? this.steer * (ct.p.z > 0 ? -1 : 1) : 0;
           const fwd = _v5.set(Math.sin(st), 0, -Math.cos(st)).applyQuaternion(this.q);
           fwd.addScaledVector(n, -fwd.dot(n)).normalize();
           const side = _v6.copy(n).cross(fwd);
@@ -40299,15 +40370,26 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
           }
           if (!ct.brake) brake = 0;
           const muB = fr.mu * (this.spec.brake ? this.spec.brake / 0.45 : 1) * 0.85;
-          const Flong = -(fr.roll + brake * muB) * Fn * Math.tanh(vl / 0.35);
-          const Flat = -fr.mu * 0.9 * Fn * Math.tanh(vs / 0.22);
-          F.addScaledVector(fwd, Flong).addScaledVector(side, Flat);
+          if (lowSpeed) {
+            const braked = brake > 0.5;
+            this.stick(ct, P, vC, n, Fn, braked ? null : fwd, braked ? Math.max(fr.mu * 0.9, muB) : fr.mu * 0.9, F);
+            if (!braked) F.addScaledVector(fwd, -(fr.roll + brake * muB) * Fn * Math.tanh(vl / 0.35));
+          } else {
+            ct.anc = null;
+            const Flong = -(fr.roll + brake * muB) * Fn * Math.tanh(vl / 0.35);
+            const Flat = -fr.mu * 0.9 * Fn * Math.tanh(vs / 0.22);
+            F.addScaledVector(fwd, Flong).addScaledVector(side, Flat);
+          }
           ct.rollSpeed = vl;
         } else {
-          const mu = ct.kind === "skid" ? 0.42 : 0.5;
+          const mu = (ct.kind === "skid" ? 0.42 : 0.5) * Math.min(1, fr.mu / 0.8 + 0.25);
           const vt = _v5.copy(vC).addScaledVector(n, -vn);
           const vtl = vt.length();
-          if (vtl > 1e-4) F.addScaledVector(vt, -mu * Fn * Math.tanh(vtl / 0.2) / vtl);
+          if (ct.kind === "skid" && lowSpeed) this.stick(ct, P, vC, n, Fn, null, mu, F);
+          else {
+            ct.anc = null;
+            if (vtl > 1e-4) F.addScaledVector(vt, -mu * Fn * Math.tanh(vtl / 0.2) / vtl);
+          }
           if (ct.kind === "scrape" || ct.kind === "rotor") this.scrape(ct, vtl, dpen, dt);
         }
         this.force.add(F);
@@ -40331,6 +40413,30 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         this.evaluateImpact(maxImpact, wheelsOn);
       }
       if (!any) this.lastVs = this.vel.y;
+    }
+    // Stick-slip friction: the contact is tied to an anchor on the ground by a stiff spring-damper;
+    // when the required force exceeds mu*Fn the anchor slides. freeDir (optional) is a direction in
+    // which the contact may roll freely (an unbraked wheel).
+    stick(ct, P, vC, n, Fn, freeDir, mu, F) {
+      if (!ct.anc) ct.anc = new Vector3().copy(P);
+      const d = _s1.copy(P).sub(ct.anc);
+      d.addScaledVector(n, -d.dot(n));
+      const vt = _s2.copy(vC).addScaledVector(n, -vC.dot(n));
+      if (freeDir) {
+        const dl = d.dot(freeDir);
+        ct.anc.addScaledVector(freeDir, dl);
+        d.addScaledVector(freeDir, -dl);
+        vt.addScaledVector(freeDir, -vt.dot(freeDir));
+      }
+      const mC = this.mass * clamp2(ct.share || 0.25, 0.1, 0.5);
+      const ks = mC * 250, cs = 2 * 0.5 * Math.sqrt(ks * mC);
+      const Fs = _s3.copy(d).multiplyScalar(-ks).addScaledVector(vt, -cs);
+      const lim = mu * Fn, L2 = Fs.length();
+      if (L2 > lim && L2 > 1e-9) {
+        Fs.multiplyScalar(lim / L2);
+        ct.anc.copy(P).addScaledVector(_s1.copy(Fs).addScaledVector(vt, cs).multiplyScalar(1 / ks), 1);
+      }
+      F.add(Fs);
     }
     evaluateImpact(vImpact, wheels) {
       const d = this.damage;
@@ -40525,6 +40631,12 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       Object.assign(this.lights, { nav: true, beacon: true, strobe: airborne, landing: airborne, taxi: !airborne, logo: true });
       for (const e of this.fm.engines) e.setRunningInstant(15);
       this.busVolts = 28;
+      this.hydPressure = this.hydFail ? 0 : 3e3;
+      this.genOnline = this.fm.engines.map(() => true);
+      this.warnings.clear();
+      this.masterWarning = false;
+      this.masterCaution = false;
+      this.fm.hydraulic = 1;
       if (this.fm.isHeli) {
         this.fm.omega = this.fm.omegaN;
         for (const e of this.fm.engines) if (e.flight !== void 0) e.flight = 1;
@@ -40992,6 +41104,20 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         const margin = fm.alphaStall / DEG + fm.flapInfo().dA - (t.alpha || 0);
         if (margin < 3) ctl.pitch = Math.min(ctl.pitch, -0.15 + margin * 0.12) - (margin < 0 ? 0.25 : 0);
         if (margin < 3) ctl.trim = Math.min(ctl.trim, this.trimI = Math.min(this.trimI, 0));
+      }
+      if (simplified && a.autoRudder && fm.onGround && t.gs > 4) {
+        if (Math.abs(raw.yaw) < 0.05) {
+          if (this.holdHdg === null) this.holdHdg = t.heading;
+          const err = (t.heading - this.holdHdg + 540) % 360 - 180;
+          ctl.yaw = clamp2(ctl.yaw - err * 0.05 + fm.w.y * 2.2, -1, 1);
+        } else {
+          this.holdHdg = null;
+          ctl.yaw = clamp2(ctl.yaw + fm.w.y * 1.2, -1, 1);
+        }
+      } else if (!fm.onGround || t.gs <= 4) this.holdHdg = null;
+      if (simplified && this.spec.gearType === "taildragger" && fm.onGround && raw.pitch > -0.3) {
+        const k = clamp2(1 - (t.ias / 0.5144 - 20) / 15, 0, 1);
+        ctl.pitch = Math.max(ctl.pitch, 0.75 * k);
       }
       if (this.spec.castering && fm.onGround && Math.abs(raw.yaw) > 0.1) {
         if (raw.yaw > 0) ctl.brakeR = Math.max(ctl.brakeR, raw.yaw * 0.6);
@@ -42293,6 +42419,56 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         x.fillText("AOA", cx, cy + 120);
       }
     }
+    // ------------------------------------------------------------ CDU / FMS (route legs page)
+    draw_cdu(x, d) {
+      x.fillStyle = "#040506";
+      x.fillRect(0, 0, 512, 512);
+      x.textBaseline = "middle";
+      const row2 = (i) => 70 + i * 52;
+      x.font = "bold 34px monospace";
+      x.fillStyle = C.white;
+      x.textAlign = "center";
+      x.fillText(d.ap && d.ap.engaged ? "ACT RTE 1 LEGS" : "RTE 1 LEGS", 256, 30);
+      x.textAlign = "right";
+      x.font = "26px monospace";
+      x.fillText("1/2", 500, 30);
+      x.textAlign = "left";
+      const dest = d.dest;
+      const distNm = dest ? dest.dist / 1852 : 0;
+      const ete = dest && d.gsKt > 30 ? distNm / d.gsKt * 60 : null;
+      const lines = [];
+      if (dest) {
+        const brg = (Math.atan2(dest.x - d.x, -(dest.z - d.z)) * 180 / Math.PI + 360) % 360;
+        lines.push(["DIRECT", `${String(Math.round(brg)).padStart(3, "0")}\xB0`, C.white]);
+        lines.push([dest.icao || "DEST", `${distNm.toFixed(1)}NM`, C.magenta]);
+        lines.push(["ETE", ete != null ? `${Math.floor(ete / 60)}+${String(Math.round(ete % 60)).padStart(2, "0")}` : "----", C.green]);
+      } else {
+        lines.push(["NO ROUTE", "", C.amber]);
+        lines.push(["", "", C.white]);
+        lines.push(["", "", C.white]);
+      }
+      const cruise = d.apState ? d.apState.alt : 0;
+      lines.push(["CRZ ALT", cruise >= 18e3 ? "FL" + Math.round(cruise / 100) : String(Math.round(cruise)), C.cyan]);
+      lines.push(["FUEL", `${(d.fuelKg / 1e3).toFixed(1)}T`, C.white]);
+      lines.push(["GW", `${(d.massKg / 1e3).toFixed(1)}T`, C.white]);
+      lines.push(["SPD/MACH", d.mach > 0.5 ? "." + Math.round(d.mach * 100) : String(Math.round(d.iasKt)), C.green]);
+      lines.forEach(([l, r, col], i) => {
+        x.font = "22px monospace";
+        x.fillStyle = C.grey;
+        x.fillText(l, 18, row2(i) - 14);
+        x.font = "bold 34px monospace";
+        x.fillStyle = col;
+        x.textAlign = "right";
+        x.fillText(r, 494, row2(i) + 10);
+        x.textAlign = "left";
+      });
+      x.fillStyle = C.white;
+      x.font = "bold 28px monospace";
+      x.fillText("<INDEX", 14, 480);
+      x.textAlign = "right";
+      x.fillText("ROUTE>", 498, 480);
+      x.textAlign = "left";
+    }
     // ------------------------------------------------------------ standby instrument (small, always powered)
     draw_standby(x, d) {
       x.fillStyle = C.dark;
@@ -42335,6 +42511,8 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     { g: "hdg", x: x0 + s + gap, y: y0 - s - gap, s },
     { g: "vsi", x: x0 + 2 * (s + gap), y: y0 - s - gap, s }
   ];
+  var row = (kinds, cx, w, h2, y = 0.07, gap = 0.022) => kinds.map((d, i) => ({ d, x: cx + (i - (kinds.length - 1) / 2) * (w + gap), y, w, h: h2 }));
+  var DECK5 = ["pfd", "nd", "eicas", "nd", "pfd"];
   var LAYOUTS = {
     // ---------------------------------------------------------------- general aviation
     ga_analog: {
@@ -42347,7 +42525,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         { g: "dual", x: 0.33, y: 0.02, s: 0.06, what: "oil" },
         { g: "dual", x: 0.33, y: -0.05, s: 0.06, what: "cht" },
         { g: "dual", x: 0.33, y: -0.12, s: 0.06, what: "volt" },
-        { d: "radio", x: 0.13, y: 0.075, w: 0.16, h: 0.12 },
+        { d: "radio", x: 0.205, y: 0.08, w: 0.15, h: 0.11 },
         { g: "clock", x: 0.47, y: 0.07, s: 0.06 }
       ],
       controls: { yoke: "yoke", yokes: 2, throttle: "knobs", flaps: "switch", gear: null, switches: "ga", key: true },
@@ -42429,7 +42607,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
     },
     // ---------------------------------------------------------------- turboprops / jets
     turboprop: {
-      panel: { w: 1.36, h: 0.4, dist: 0.7, top: -0.1, tilt: 12, color: "#2e3136", cx: 0.36 },
+      panel: { w: 1.36, h: 0.4, dist: 0.7, top: -0.16, tilt: 12, color: "#2e3136", cx: 0.36 },
       glare: { depth: 0.22, color: "#18191b", mcp: true },
       items: [
         { d: "pfd", x: -0.02, y: 0.03, w: 0.17, h: 0.17 },
@@ -42452,56 +42630,37 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 1.05
     },
     regional_glass: {
-      panel: { w: 1.7, h: 0.4, dist: 0.74, top: -0.1, tilt: 12, color: "#3a4049", cx: 0.5 },
-      glare: { depth: 0.26, color: "#22262b", mcp: true },
-      items: [
-        { d: "pfd", x: -0.03, y: 0, w: 0.2, h: 0.2 },
-        { d: "nd", x: 0.2, y: 0, w: 0.2, h: 0.2 },
-        { d: "eicas", x: 0.5, y: 0, w: 0.2, h: 0.2 },
-        { d: "nd", x: 0.8, y: 0, w: 0.2, h: 0.2 },
-        { d: "pfd", x: 1.03, y: 0, w: 0.2, h: 0.2 },
-        { d: "standby", x: 0.5, y: -0.15, w: 0.07, h: 0.07 }
-      ],
+      modern: true,
+      panel: { w: 1.7, h: 0.44, dist: 0.74, top: -0.18, tilt: 12, color: "#2c323a", cx: 0.5 },
+      glare: { depth: 0.26, color: "#1b1f25", mcp: true },
+      items: [...row(DECK5, 0.5, 0.24, 0.185), { d: "standby", x: 0.33, y: -0.12, w: 0.07, h: 0.07 }],
       controls: { yoke: "yoke", yokes: 2, throttle: "pedestal", levers: 2, condition: true, flaps: "pedestal", gear: "lever", switches: "overhead" },
       seatGap: 1,
-      interior: "#6c727a",
+      interior: "#3d444e",
       floorDrop: 1.08
     },
     rj_glass: {
-      panel: { w: 1.75, h: 0.42, dist: 0.74, top: -0.1, tilt: 13, color: "#30353c", cx: 0.52 },
-      glare: { depth: 0.26, color: "#1e2226", mcp: true },
-      items: [
-        { d: "pfd", x: -0.03, y: 0, w: 0.19, h: 0.22 },
-        { d: "nd", x: 0.18, y: 0, w: 0.19, h: 0.22 },
-        { d: "eicas", x: 0.52, y: 0.02, w: 0.2, h: 0.2 },
-        { d: "eicas", x: 0.52, y: -0.2, w: 0.18, h: 0.14, page: "sys" },
-        { d: "nd", x: 0.86, y: 0, w: 0.19, h: 0.22 },
-        { d: "pfd", x: 1.07, y: 0, w: 0.19, h: 0.22 }
-      ],
+      modern: true,
+      panel: { w: 1.75, h: 0.45, dist: 0.74, top: -0.18, tilt: 13, color: "#2b3139", cx: 0.52 },
+      glare: { depth: 0.26, color: "#1a1e24", mcp: true },
+      items: [...row(DECK5, 0.52, 0.25, 0.19), { d: "standby", x: 0.34, y: -0.125, w: 0.07, h: 0.07 }],
       controls: { yoke: "yoke", yokes: 2, throttle: "pedestal", levers: 2, flaps: "pedestal", gear: "lever", switches: "overhead", speedbrake: true },
       seatGap: 1.04,
-      interior: "#5c636c",
+      interior: "#3b424c",
       floorDrop: 1.08
     },
     nb_glass: {
-      panel: { w: 1.9, h: 0.44, dist: 0.76, top: -0.1, tilt: 14, color: "#3b4149", cx: 0.54 },
-      glare: { depth: 0.3, color: "#23272c", mcp: true },
-      items: [
-        { d: "pfd", x: -0.04, y: 0, w: 0.21, h: 0.21 },
-        { d: "nd", x: 0.2, y: 0, w: 0.21, h: 0.21 },
-        { d: "eicas", x: 0.54, y: 0.02, w: 0.22, h: 0.22 },
-        { d: "eicas", x: 0.54, y: -0.21, w: 0.2, h: 0.16, page: "sys" },
-        { d: "nd", x: 0.88, y: 0, w: 0.21, h: 0.21 },
-        { d: "pfd", x: 1.12, y: 0, w: 0.21, h: 0.21 },
-        { d: "standby", x: 0.37, y: 0.05, w: 0.06, h: 0.06 }
-      ],
+      modern: true,
+      panel: { w: 1.9, h: 0.46, dist: 0.76, top: -0.19, tilt: 14, color: "#2b3139", cx: 0.54 },
+      glare: { depth: 0.3, color: "#1b1f25", mcp: true },
+      items: [...row(DECK5, 0.54, 0.27, 0.205), { d: "standby", x: 0.35, y: -0.13, w: 0.07, h: 0.07 }],
       controls: { yoke: "yoke", yokes: 2, throttle: "pedestal", levers: 2, flaps: "pedestal", gear: "lever", switches: "overhead", speedbrake: true, fireHandles: true },
       seatGap: 1.08,
-      interior: "#69707a",
+      interior: "#3c434d",
       floorDrop: 1.1
     },
     classic_3crew: {
-      panel: { w: 1.85, h: 0.46, dist: 0.76, top: -0.1, tilt: 12, color: "#3c4a3e", cx: 0.55 },
+      panel: { w: 1.85, h: 0.46, dist: 0.76, top: -0.19, tilt: 12, color: "#3c4a3e", cx: 0.55 },
       glare: { depth: 0.28, color: "#232a24", mcp: true },
       items: [
         ...six(-0.13, 0.1, 0.09, 0.012),
@@ -42526,38 +42685,27 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 1.1
     },
     wb_glass: {
-      panel: { w: 2.1, h: 0.42, dist: 0.8, top: -0.1, tilt: 14, color: "#2a2e33", cx: 0.62 },
-      glare: { depth: 0.32, color: "#1a1d20", mcp: true, hud: true },
-      items: [
-        { d: "pfd", x: -0.05, y: 0, w: 0.27, h: 0.2 },
-        { d: "nd", x: 0.25, y: 0, w: 0.27, h: 0.2 },
-        { d: "eicas", x: 0.62, y: 0, w: 0.27, h: 0.2 },
-        { d: "nd", x: 0.99, y: 0, w: 0.27, h: 0.2 },
-        { d: "pfd", x: 1.29, y: 0, w: 0.27, h: 0.2 }
-      ],
+      modern: true,
+      panel: { w: 2.1, h: 0.46, dist: 0.8, top: -0.2, tilt: 14, color: "#2a3038", cx: 0.62 },
+      glare: { depth: 0.32, color: "#191d22", mcp: true, hud: true },
+      items: [...row(DECK5, 0.62, 0.3, 0.215), { d: "standby", x: 0.42, y: -0.135, w: 0.075, h: 0.075 }],
       controls: { yoke: "yoke", yokes: 2, throttle: "pedestal", levers: 2, flaps: "pedestal", gear: "lever", switches: "overhead", speedbrake: true, fireHandles: true },
       seatGap: 1.24,
-      interior: "#5d636b",
+      interior: "#3a414b",
       floorDrop: 1.12
     },
     jumbo_glass: {
-      panel: { w: 2, h: 0.44, dist: 0.78, top: -0.1, tilt: 13, color: "#3b4048", cx: 0.6 },
-      glare: { depth: 0.3, color: "#22262b", mcp: true },
-      items: [
-        { d: "pfd", x: -0.05, y: 0, w: 0.21, h: 0.21 },
-        { d: "nd", x: 0.19, y: 0, w: 0.21, h: 0.21 },
-        { d: "eicas", x: 0.6, y: 0.03, w: 0.22, h: 0.22 },
-        { d: "eicas", x: 0.6, y: -0.2, w: 0.2, h: 0.16, page: "sys" },
-        { d: "nd", x: 1.01, y: 0, w: 0.21, h: 0.21 },
-        { d: "pfd", x: 1.25, y: 0, w: 0.21, h: 0.21 }
-      ],
+      modern: true,
+      panel: { w: 2, h: 0.46, dist: 0.78, top: -0.2, tilt: 13, color: "#2c323a", cx: 0.6 },
+      glare: { depth: 0.3, color: "#1b1f25", mcp: true },
+      items: [...row(DECK5, 0.6, 0.28, 0.21), { d: "standby", x: 0.41, y: -0.135, w: 0.075, h: 0.075 }],
       controls: { yoke: "yoke", yokes: 2, throttle: "pedestal", levers: 4, flaps: "pedestal", gear: "lever", switches: "overhead", speedbrake: true, fireHandles: true },
       seatGap: 1.2,
-      interior: "#6c727b",
+      interior: "#3c434d",
       floorDrop: 1.12
     },
     sst_classic: {
-      panel: { w: 1.5, h: 0.44, dist: 0.7, top: -0.12, tilt: 10, color: "#2f3640", cx: 0.5 },
+      panel: { w: 1.5, h: 0.44, dist: 0.7, top: -0.155, tilt: 10, color: "#2f3640", cx: 0.5 },
       glare: { depth: 0.2, color: "#1d2228", mcp: true },
       items: [
         ...six(-0.12, 0.09, 0.08, 0.012),
@@ -42578,7 +42726,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 1.02
     },
     vlj_glass: {
-      panel: { w: 1.22, h: 0.34, dist: 0.62, top: -0.08, tilt: 14, color: "#1b1c1f", cx: 0.34 },
+      panel: { w: 1.22, h: 0.34, dist: 0.62, top: -0.11, tilt: 14, color: "#1b1c1f", cx: 0.34 },
       glare: { depth: 0.18, color: "#111214", mcp: true },
       items: [
         { d: "pfd", x: 0, y: 0, w: 0.27, h: 0.18 },
@@ -42591,17 +42739,13 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 0.98
     },
     bizjet_glass: {
-      panel: { w: 1.7, h: 0.42, dist: 0.74, top: -0.1, tilt: 14, color: "#262a2f", cx: 0.5 },
-      glare: { depth: 0.26, color: "#191b1e", mcp: true, hud: true },
-      items: [
-        { d: "pfd", x: -0.03, y: 0, w: 0.25, h: 0.2 },
-        { d: "nd", x: 0.25, y: 0, w: 0.25, h: 0.2 },
-        { d: "eicas", x: 0.75, y: 0, w: 0.25, h: 0.2 },
-        { d: "pfd", x: 1.03, y: 0, w: 0.25, h: 0.2 }
-      ],
+      modern: true,
+      panel: { w: 1.7, h: 0.44, dist: 0.74, top: -0.17, tilt: 14, color: "#262b31", cx: 0.5 },
+      glare: { depth: 0.26, color: "#17191d", mcp: true, hud: true },
+      items: [...row(["pfd", "nd", "eicas", "pfd"], 0.5, 0.3, 0.2)],
       controls: { yoke: "yoke", yokes: 2, throttle: "pedestal", levers: 2, flaps: "pedestal", gear: "lever", switches: "overhead", speedbrake: true, fireHandles: true },
       seatGap: 1,
-      interior: "#d0c7b8",
+      interior: "#c9c1b4",
       floorDrop: 1.05
     },
     fighter: {
@@ -42644,8 +42788,8 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 0.95
     },
     heli_glass: {
-      panel: { w: 1.4, h: 0.36, dist: 0.7, top: -0.15, tilt: 18, color: "#25282c", cx: -0.48 },
-      glare: { depth: 0.2, color: "#17191b", mcp: true },
+      panel: { w: 1.4, h: 0.36, dist: 0.7, top: -0.21, tilt: 18, color: "#2c3036", cx: -0.48 },
+      glare: { depth: 0.12, color: "#17191b", mcp: true },
       items: [
         { d: "pfd", x: -0, y: 0, w: 0.2, h: 0.2 },
         { d: "eicas", x: 0.24, y: 0, w: 0.2, h: 0.2 },
@@ -42659,7 +42803,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 1
     },
     heli_utility: {
-      panel: { w: 1.25, h: 0.36, dist: 0.7, top: -0.18, tilt: 16, color: "#1f2322", cx: -0.55 },
+      panel: { w: 1.25, h: 0.36, dist: 0.7, top: -0.22, tilt: 16, color: "#262b29", cx: -0.55 },
       glare: { depth: 0.18, color: "#141716" },
       items: [
         { g: "asi", x: -0.08, y: 0.08, s: 0.085 },
@@ -42684,8 +42828,8 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 1
     },
     heli_rescue: {
-      panel: { w: 1.1, h: 0.34, dist: 0.66, top: -0.16, tilt: 18, color: "#24272b", cx: -0.42 },
-      glare: { depth: 0.16, color: "#16181a", mcp: true },
+      panel: { w: 1.1, h: 0.34, dist: 0.66, top: -0.21, tilt: 18, color: "#2b2f34", cx: -0.42 },
+      glare: { depth: 0.11, color: "#16181a", mcp: true },
       items: [
         { d: "pfd", x: 0, y: 0, w: 0.19, h: 0.19 },
         { d: "eicas", x: 0.42, y: 0, w: 0.19, h: 0.19 },
@@ -42698,8 +42842,8 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 0.98
     },
     heli_heavy: {
-      panel: { w: 1.5, h: 0.4, dist: 0.74, top: -0.16, tilt: 14, color: "#2b302c", cx: -0.55 },
-      glare: { depth: 0.22, color: "#1b1f1c", mcp: true },
+      panel: { w: 1.5, h: 0.4, dist: 0.74, top: -0.2, tilt: 14, color: "#323833", cx: -0.55 },
+      glare: { depth: 0.15, color: "#1b1f1c", mcp: true },
       items: [
         { d: "pfd", x: 0, y: 0.02, w: 0.19, h: 0.19 },
         { d: "nd", x: 0.22, y: 0.02, w: 0.19, h: 0.19 },
@@ -42714,6 +42858,557 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       floorDrop: 1.05
     }
   };
+
+  // src/cockpit/flightdeck.js
+  function pair(w, h2, draw) {
+    const a = document.createElement("canvas");
+    a.width = w;
+    a.height = h2;
+    const b = document.createElement("canvas");
+    b.width = w;
+    b.height = h2;
+    const cb = a.getContext("2d"), cg = b.getContext("2d");
+    cg.fillStyle = "#000";
+    cg.fillRect(0, 0, w, h2);
+    draw(cb, cg, w, h2);
+    const map = new CanvasTexture(a);
+    map.colorSpace = SRGBColorSpace;
+    map.anisotropy = 8;
+    const glow2 = new CanvasTexture(b);
+    glow2.colorSpace = SRGBColorSpace;
+    glow2.anisotropy = 8;
+    return { map, glow: glow2 };
+  }
+  function rng(seed) {
+    let s = seed >>> 0;
+    return () => {
+      s = s * 1664525 + 1013904223 >>> 0;
+      return s / 4294967296;
+    };
+  }
+  function grain(x, w, h2, base, n = 2500, seed = 7) {
+    x.fillStyle = base;
+    x.fillRect(0, 0, w, h2);
+    const r = rng(seed);
+    for (let i = 0; i < n; i++) {
+      x.fillStyle = r() > 0.5 ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.05)";
+      x.fillRect(r() * w, r() * h2, 2, 2);
+    }
+  }
+  function screw(x, cx, cy, r = 4) {
+    x.fillStyle = "#5c646e";
+    x.beginPath();
+    x.arc(cx, cy, r, 0, Math.PI * 2);
+    x.fill();
+    x.strokeStyle = "#2a2f35";
+    x.lineWidth = 1.5;
+    x.beginPath();
+    x.moveTo(cx - r * 0.7, cy);
+    x.lineTo(cx + r * 0.7, cy);
+    x.stroke();
+  }
+  function knobDraw(x, cx, cy, r) {
+    const g = x.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    g.addColorStop(0, "#5a6068");
+    g.addColorStop(1, "#15181b");
+    x.fillStyle = g;
+    x.beginPath();
+    x.arc(cx, cy, r, 0, Math.PI * 2);
+    x.fill();
+    x.strokeStyle = "#0a0b0c";
+    x.lineWidth = 2;
+    x.stroke();
+    x.strokeStyle = "#c9ced4";
+    x.lineWidth = 2;
+    x.beginPath();
+    x.moveTo(cx, cy - r * 0.2);
+    x.lineTo(cx, cy - r * 0.85);
+    x.stroke();
+  }
+  function pushButton(b, g, x0, y0, s, label2, lit) {
+    b.fillStyle = "#16191d";
+    b.fillRect(x0, y0, s, s);
+    b.strokeStyle = "#07080a";
+    b.lineWidth = 2;
+    b.strokeRect(x0 + 1, y0 + 1, s - 2, s - 2);
+    b.fillStyle = "#23282e";
+    b.fillRect(x0 + 4, y0 + 4, s - 8, s - 8);
+    const words = label2.split(" ");
+    const fs = Math.max(9, Math.floor(s * 0.2));
+    for (const ctx of [b, g]) {
+      ctx.font = `bold ${fs}px Arial`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = ctx === b ? "#8f99a4" : "#cfe6ff";
+      words.slice(0, 2).forEach((w2, i) => ctx.fillText(w2, x0 + s / 2, y0 + s * (words.length > 1 ? 0.3 + i * 0.22 : 0.38)));
+    }
+    if (lit) {
+      const col = lit === "fault" ? "#ffb020" : lit === "on" ? "#5aff7a" : "#ffffff";
+      g.fillStyle = col;
+      g.globalAlpha = 0.55;
+      g.fillRect(x0 + s * 0.2, y0 + s * 0.72, s * 0.6, s * 0.12);
+      g.globalAlpha = 1;
+      b.fillStyle = "#2d3238";
+      b.fillRect(x0 + s * 0.2, y0 + s * 0.72, s * 0.6, s * 0.12);
+    }
+  }
+  var OVH_MODULES = [
+    ["ELECTRICAL", ["BATT 1", "BATT 2", "GEN 1", "GEN 2", "APU GEN", "EXT PWR"]],
+    ["HYDRAULIC", ["SYS 1", "SYS 2", "SYS 3", "PTU"]],
+    ["FUEL", ["L PUMP", "R PUMP", "X FEED", "CTR PUMP"]],
+    ["AIR COND", ["PACK 1", "PACK 2", "BLEED 1", "BLEED 2", "APU BLEED", "RECIRC"]],
+    ["ANTI ICE", ["WING", "ENG 1", "ENG 2", "WSHLD", "PROBES"]],
+    ["ENGINE", ["START 1", "START 2", "IGN A", "IGN B", "AUTO RELIT"]],
+    ["FIRE PROT", ["ENG 1", "APU", "ENG 2", "TEST", "CARGO"]],
+    ["EXT LIGHTS", ["NAV", "BEACON", "STROBE", "LOGO", "WING", "TAXI"]],
+    ["PRESSURIZ", ["MODE", "DUMP", "LDG ELEV", "MAN"]],
+    ["OXYGEN", ["CREW", "PAX", "TMR RESET"]],
+    ["WIPERS", ["LEFT", "RIGHT", "RAIN RPL"]],
+    ["SIGNS", ["SEAT BELT", "NO SMOKE", "EMER LT", "CALLS"]]
+  ];
+  function overheadTexture(seed) {
+    return pair(1024, 1024, (b, g, W, H) => {
+      grain(b, W, H, "#363e48", 4e3, seed);
+      const r = rng(seed + 3);
+      const cols = 4, rows = 3, pad3 = 14;
+      const cw = (W - pad3 * (cols + 1)) / cols, ch = (H - 60 - pad3 * (rows + 1)) / rows;
+      OVH_MODULES.forEach(([title, btns], k) => {
+        const cx = pad3 + k % cols * (cw + pad3), cy = 50 + pad3 + Math.floor(k / cols) * (ch + pad3);
+        b.fillStyle = "#2e353e";
+        b.fillRect(cx, cy, cw, ch);
+        b.strokeStyle = "#1b2026";
+        b.lineWidth = 3;
+        b.strokeRect(cx, cy, cw, ch);
+        for (const ctx of [b, g]) {
+          ctx.strokeStyle = ctx === b ? "#7d8792" : "rgba(170,205,255,0.55)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(cx + 8, cy + 26, cw - 16, ch - 34);
+          ctx.font = "bold 20px Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = ctx === b ? "#aeb8c3" : "#d8ecff";
+          ctx.fillText(title, cx + cw / 2, cy + 14);
+        }
+        const n = btns.length, per = n > 4 ? 3 : 2;
+        const s = Math.min(70, (cw - 40) / per - 14);
+        btns.forEach((lbl, i) => {
+          const col = i % per, row2 = Math.floor(i / per);
+          const bx = cx + 20 + col * ((cw - 40) / per) + ((cw - 40) / per - s) / 2;
+          const by = cy + 40 + row2 * (s + 18);
+          if (by + s > cy + ch - 6) return;
+          const roll = r();
+          pushButton(b, g, bx, by, s, lbl, roll < 0.12 ? "fault" : roll < 0.45 ? "on" : null);
+        });
+        if (k % 3 === 1) knobDraw(b, cx + cw - 34, cy + ch - 34, 16);
+        screw(b, cx + 6, cy + 6);
+        screw(b, cx + cw - 6, cy + 6);
+        screw(b, cx + 6, cy + ch - 6);
+        screw(b, cx + cw - 6, cy + ch - 6);
+      });
+      for (const ctx of [b, g]) {
+        ctx.font = "bold 24px Arial";
+        ctx.textAlign = "center";
+        ctx.fillStyle = ctx === b ? "#9aa4ae" : "#bcd8ff";
+        ctx.fillText("OVERHEAD PANEL", W / 2, 26);
+      }
+    });
+  }
+  function pedestalTexture(levers) {
+    const out = { cdu: [] };
+    out.tex = pair(512, 1280, (b, g, W, H) => {
+      grain(b, W, H, "#2b3139", 3e3, 11);
+      const lab = (ctx, t, x, y, size = 18, col) => {
+        ctx.font = `bold ${size}px Arial`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = col;
+        ctx.fillText(t, x, y);
+      };
+      const both = (t, x, y, size, cb = "#9aa4ae", cg = "#d6eaff") => {
+        lab(b, t, x, y, size, cb);
+        lab(g, t, x, y, size, cg);
+      };
+      b.fillStyle = "#20252b";
+      b.fillRect(20, 20, W - 40, 400);
+      const slots = levers;
+      for (let i = 0; i < slots; i++) {
+        const x = W / 2 - 60 + 120 / Math.max(1, slots - 1) * i - (slots === 1 ? -60 : 0);
+        b.fillStyle = "#07080a";
+        b.fillRect(x - 7, 60, 14, 320);
+      }
+      ["TO/GA", "FLX MCT", "CL", "IDLE", "REV"].forEach((t, i) => both(t, W / 2 + 120, 80 + i * 70, 16));
+      b.fillStyle = "#07080a";
+      b.fillRect(56, 70, 12, 300);
+      b.fillRect(W - 68, 70, 12, 300);
+      ["RET", "1/2", "FULL"].forEach((t, i) => both(t, 100, 90 + i * 130, 15));
+      ["0", "1", "2", "3", "FULL"].forEach((t, i) => both(t, W - 110, 90 + i * 68, 15));
+      both("SPD BRK", 62, 400, 14);
+      both("FLAPS", W - 62, 400, 14);
+      for (let k = 0; k < 2; k++) {
+        const x0 = 18 + k * (W / 2), w = W / 2 - 36, y0 = 450, h2 = 450;
+        b.fillStyle = "#1b1f24";
+        b.fillRect(x0, y0, w, h2);
+        b.strokeStyle = "#0a0c0e";
+        b.lineWidth = 3;
+        b.strokeRect(x0, y0, w, h2);
+        const sx = x0 + 34, sw = w - 68, sy = y0 + 14, sh = 170;
+        b.fillStyle = "#020304";
+        b.fillRect(sx, sy, sw, sh);
+        out.cdu.push({ x: sx, y: sy, w: sw, h: sh });
+        for (let i = 0; i < 6; i++) {
+          for (const lx of [x0 + 8, x0 + w - 26]) {
+            b.fillStyle = "#3a4048";
+            b.fillRect(lx, sy + 12 + i * 26, 18, 14);
+          }
+        }
+        const fk = ["INIT", "RTE", "DEP", "LEGS", "HOLD", "PROG", "MENU", "EXEC"];
+        fk.forEach((t, i) => {
+          const kx = x0 + 12 + i % 4 * ((w - 24) / 4), ky = y0 + 196 + Math.floor(i / 4) * 34;
+          b.fillStyle = "#2c3239";
+          b.fillRect(kx, ky, (w - 24) / 4 - 6, 26);
+          lab(b, t, kx + ((w - 24) / 4 - 6) / 2, ky + 13, 13, "#c8d0d8");
+          lab(g, t, kx + ((w - 24) / 4 - 6) / 2, ky + 13, 13, "#e0f0ff");
+          if (t === "EXEC") {
+            g.fillStyle = "rgba(80,255,120,0.6)";
+            g.fillRect(kx + 6, ky + 2, (w - 24) / 4 - 18, 4);
+          }
+        });
+        const keys = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+        keys.forEach((t, i) => {
+          const kx = x0 + 96 + i % 5 * 26, ky = y0 + 272 + Math.floor(i / 5) * 28;
+          b.fillStyle = "#2c3239";
+          b.fillRect(kx, ky, 22, 22);
+          lab(b, t, kx + 11, ky + 11, 13, "#c8d0d8");
+          lab(g, t, kx + 11, ky + 11, 13, "#e0f0ff");
+        });
+        "123456789.0-".split("").forEach((t, i) => {
+          const kx = x0 + 14 + i % 3 * 26, ky = y0 + 272 + Math.floor(i / 3) * 34;
+          b.fillStyle = "#2c3239";
+          b.fillRect(kx, ky, 22, 26);
+          lab(b, t, kx + 11, ky + 13, 14, "#c8d0d8");
+          lab(g, t, kx + 11, ky + 13, 14, "#e0f0ff");
+        });
+      }
+      for (let k = 0; k < 2; k++) {
+        const x0 = 18 + k * (W / 2), w = W / 2 - 36, y0 = 925;
+        b.fillStyle = "#1d2227";
+        b.fillRect(x0, y0, w, 150);
+        b.fillStyle = "#060707";
+        b.fillRect(x0 + 12, y0 + 16, w / 2 - 18, 40);
+        b.fillRect(x0 + w / 2 + 6, y0 + 16, w / 2 - 18, 40);
+        for (const ctx of [b, g]) {
+          ctx.font = "bold 26px monospace";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = ctx === b ? "#3a2a10" : "#ffb84a";
+          ctx.fillText(k ? "121.50" : "118.70", x0 + w / 4 + 3, y0 + 37);
+          ctx.fillText(k ? "123.45" : "124.35", x0 + w * 0.75 - 3, y0 + 37);
+        }
+        both(k ? "VHF 2" : "VHF 1", x0 + w / 2, y0 + 75, 14);
+        knobDraw(b, x0 + w / 2, y0 + 112, 22);
+        ["VHF1", "VHF2", "HF", "NAV"].forEach((t, i) => {
+          const bx = x0 + 10 + i * 30 + (i > 1 ? w - 140 : 0);
+          b.fillStyle = "#2c3239";
+          b.fillRect(bx, y0 + 100, 26, 22);
+          lab(g, t, bx + 13, y0 + 111, 10, "#d6eaff");
+          lab(b, t, bx + 13, y0 + 111, 10, "#aab3bd");
+        });
+      }
+      b.fillStyle = "#1d2227";
+      b.fillRect(18, 1090, W - 36, 170);
+      b.fillStyle = "#060707";
+      b.fillRect(40, 1110, 150, 44);
+      for (const ctx of [b, g]) {
+        ctx.font = "bold 28px monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = ctx === b ? "#103a10" : "#62ff7a";
+        ctx.fillText("7000", 115, 1133);
+      }
+      both("XPDR / TCAS", 115, 1175, 14);
+      knobDraw(b, 300, 1150, 26);
+      both("RUD TRIM", 300, 1195, 13);
+      b.fillStyle = "#7a1414";
+      b.fillRect(380, 1112, 90, 50);
+      both("PARK BRK", 425, 1185, 13);
+      both("AILERON TRIM", 300, 1238, 12);
+    });
+    return out;
+  }
+  function efisTexture() {
+    return pair(512, 128, (b, g, W, H) => {
+      grain(b, W, H, "#262c33", 600, 21);
+      b.strokeStyle = "#0d0f12";
+      b.lineWidth = 4;
+      b.strokeRect(2, 2, W - 4, H - 4);
+      knobDraw(b, 60, 64, 34);
+      knobDraw(b, W - 60, 64, 34);
+      b.fillStyle = "#050607";
+      b.fillRect(110, 18, 110, 40);
+      for (const ctx of [b, g]) {
+        ctx.font = "bold 28px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = ctx === b ? "#3a2a10" : "#ffb84a";
+        ctx.fillText("29.92", 165, 38);
+        ctx.font = "bold 15px Arial";
+        ctx.fillStyle = ctx === b ? "#9aa4ae" : "#d6eaff";
+        ctx.fillText("BARO", 60, 112);
+        ctx.fillText("RANGE", W - 60, 112);
+        ctx.fillText("MINS", 165, 80);
+      }
+      ["MAP", "PLAN", "TFC", "TERR", "WXR", "FPV"].forEach((t, i) => {
+        const x = 240 + i % 3 * 56, y = 20 + Math.floor(i / 3) * 50;
+        b.fillStyle = "#16191d";
+        b.fillRect(x, y, 48, 38);
+        b.font = "bold 14px Arial";
+        b.textAlign = "center";
+        b.fillStyle = "#8f99a4";
+        b.fillText(t, x + 24, y + 16);
+        g.font = "bold 14px Arial";
+        g.textAlign = "center";
+        g.fillStyle = "#d6eaff";
+        g.fillText(t, x + 24, y + 16);
+        if (i % 2 === 0) {
+          g.fillStyle = "rgba(90,255,120,0.6)";
+          g.fillRect(x + 12, y + 28, 24, 4);
+        }
+      });
+    });
+  }
+  function extrudeX(points, x0, x1) {
+    const s = new Shape();
+    points.forEach(([f, u], i) => i ? s.lineTo(f, u) : s.moveTo(f, u));
+    s.closePath();
+    const g = new ExtrudeGeometry(s, { depth: x1 - x0, bevelEnabled: false, curveSegments: 6 });
+    g.rotateY(Math.PI / 2);
+    g.translate(x0, 0, 0);
+    return g;
+  }
+  function toNonIndexed(geo) {
+    let g = geo.index ? geo.toNonIndexed() : geo;
+    if (!g.attributes.uv) g.setAttribute("uv", new BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "uv") g.deleteAttribute(k);
+    return g;
+  }
+  var StaticBatch = class {
+    constructor() {
+      this.parts = /* @__PURE__ */ new Map();
+    }
+    add(mat2, geo, pos = null, rot = null) {
+      const g = toNonIndexed(geo);
+      if (rot) g.applyMatrix4(new Matrix4().makeRotationFromEuler(rot));
+      if (pos) g.translate(pos.x, pos.y, pos.z);
+      if (!this.parts.has(mat2)) this.parts.set(mat2, []);
+      this.parts.get(mat2).push(g);
+    }
+    build(parent) {
+      for (const [mat2, list] of this.parts) {
+        const g = list.length === 1 ? list[0] : mergeGeometries(list, false);
+        if (!g) continue;
+        g.computeBoundingSphere();
+        const m = new Mesh(g, mat2);
+        m.name = "deckStatic";
+        parent.add(m);
+      }
+      this.parts.clear();
+    }
+  };
+  function buildModernDeck(ck) {
+    const eye = ck.eye, L2 = ck.layout, P = L2.panel, C2 = L2.controls, fm = ck.ac.fm, spec = ck.spec, sys = ck.ac.systems;
+    const gap = L2.seatGap || 1;
+    const cxW = eye.x + P.cx;
+    const tilt = P.tilt * DEG;
+    const topY = eye.y + P.top - P.h / 2 + P.h / 2 * Math.cos(tilt);
+    const topZ = eye.z - P.dist - P.h / 2 * Math.sin(tilt);
+    const batch = new StaticBatch();
+    const M = ck.M;
+    const mats = ck.mats;
+    const glowMat = (tex, color, base = "#ffffff", rough = 0.7) => {
+      const m = new M({ map: tex.map, emissiveMap: tex.glow, emissive: new Color(color), emissiveIntensity: 0.3, roughness: rough, metalness: 0.1, color: new Color(base) });
+      ck.glowMats.push(m);
+      return m;
+    };
+    const hoodMat = new M({ color: new Color(L2.glare.color || "#1c2026"), roughness: 0.92, metalness: 0.05 });
+    const depth = L2.glare.depth + 0.12;
+    const hood = extrudeX([
+      [-0.035, -0.012],
+      [-0.035, 0.034],
+      [-0.02, 0.05],
+      [0.04, 0.058],
+      [depth * 0.6, 0.05],
+      [depth, 0.03],
+      [depth, -0.05],
+      [0, -0.05]
+    ], cxW - P.w / 2 - 0.05, cxW + P.w / 2 + 0.05);
+    batch.add(hoodMat, hood, new Vector3(0, topY, topZ));
+    const led = new MeshBasicMaterial({ color: 4161023 });
+    ck.ledMat = led;
+    batch.add(led, new BoxGeometry(P.w + 0.06, 4e-3, 6e-3), new Vector3(cxW, topY - 0.014, topZ + 0.034));
+    const efis = glowMat(efisTexture(), "#cfe4ff");
+    const ew = 0.2, eh = 0.05;
+    for (const sx of [eye.x - 0.02, eye.x + (eye.x < 0 ? gap : -gap) + 0.02]) {
+      const pl = new PlaneGeometry(ew, eh);
+      batch.add(efis, pl, new Vector3(sx, topY + 0.011, topZ + 0.036), new Euler(-0.12, 0, 0));
+    }
+    const pedW = 0.36, pedL = 0.92;
+    const pedFrontZ = eye.z - P.dist + 0.16, pedBackZ = pedFrontZ + pedL;
+    const pedZ = (pedFrontZ + pedBackZ) / 2;
+    const pedTopFront = eye.y - 0.5, pedTopBack = eye.y - 0.58;
+    const slope = Math.atan2(pedTopFront - pedTopBack, pedL);
+    const pedY = (pedTopFront + pedTopBack) / 2;
+    const nLevers = C2.levers || fm.engines.length || 2;
+    const ped = pedestalTexture(nLevers);
+    const pedMat = glowMat(ped.tex, "#d6eaff", "#ffffff", 0.8);
+    const topGeo = new PlaneGeometry(pedW, pedL).rotateX(-Math.PI / 2);
+    batch.add(pedMat, topGeo, new Vector3(cxW, pedY + 1e-3, pedZ), new Euler(slope, 0, 0));
+    const floorY = ck.floorY;
+    const bodyH = pedY - floorY;
+    batch.add(mats.dark, new BoxGeometry(pedW, bodyH, pedL), new Vector3(cxW, floorY + bodyH / 2 - 4e-3, pedZ));
+    const riserH = eye.y + P.top - P.h - floorY;
+    if (riserH > 0.05) batch.add(mats.dark, new BoxGeometry(pedW * 1.1, riserH, 0.2), new Vector3(cxW, floorY + riserH / 2, eye.z - P.dist + 0.06));
+    const cdu = new Display("cdu", 256);
+    cdu.interval = 0.5;
+    ck.displays.push(cdu);
+    const cduGeos = [];
+    const cw = 512, chh = 1280;
+    for (const r of ped.cdu) {
+      const w = r.w / cw * pedW, h2 = r.h / chh * pedL;
+      const cx2 = (r.x + r.w / 2) / cw * pedW - pedW / 2;
+      const cz = (r.y + r.h / 2) / chh * pedL - pedL / 2;
+      const g = new PlaneGeometry(w, h2).rotateX(-Math.PI / 2);
+      g.translate(cx2, 3e-3, cz);
+      g.applyMatrix4(new Matrix4().makeRotationX(slope));
+      g.translate(cxW, pedY, pedZ);
+      cduGeos.push(toNonIndexed(g));
+    }
+    const cduMesh = new Mesh(mergeGeometries(cduGeos, false), cdu.material);
+    ck.group.add(cduMesh);
+    ck.addTip(cduMesh, "Control display units (FMS): route, distance and time to destination, fuel and weight");
+    const surfY = (lz) => pedY - lz * Math.tan(slope);
+    const lzOf = (canvasY) => canvasY / chh * pedL - pedL / 2;
+    ck.throttleLevers = [];
+    const pivotLz = lzOf(230);
+    for (let i = 0; i < nLevers; i++) {
+      const lx = (nLevers === 1 ? 0 : -60 + 120 / (nLevers - 1) * i) / cw * pedW;
+      const lv = new Group();
+      lv.position.set(cxW + lx, surfY(pivotLz), pedZ + pivotLz);
+      const arm = new Mesh(new BoxGeometry(0.012, 0.16, 0.018).translate(0, 0.08, 0), mats.metal);
+      const grip = new Mesh(new BoxGeometry(0.05, 0.034, 0.036).translate(0, 0.17, 0), mats.black);
+      lv.add(arm);
+      lv.add(grip);
+      if (C2.reversers !== false && spec.systems && spec.systems.reversers) {
+        const rev = new Mesh(new BoxGeometry(0.01, 0.05, 0.012).translate(0, 0.12, 0.016), mats.metal);
+        lv.add(rev);
+        ck.anim.push(() => {
+          rev.rotation.x = fm.reverserPos * -0.9;
+        });
+      }
+      ck.group.add(lv);
+      ck.throttleLevers.push(lv);
+      ck.addClick(grip, "Thrust lever " + (i + 1), `Thrust lever ${i + 1}: R/F (or PgUp/PgDn) moves all levers. Click: idle / full`, () => {
+        const t = fm.ctl.throttle[i] > 0.5 ? 0 : 1;
+        ck.ac.setThrottleAll(t);
+      });
+      ck.anim.push(() => {
+        lv.rotation.x = -0.7 + (fm.ctl.throttle[i] ?? 0) * 1.15;
+      });
+    }
+    if (C2.speedbrake) {
+      const lv = new Group();
+      lv.position.set(cxW + (62 / cw - 0.5) * pedW, surfY(lzOf(220)), pedZ + lzOf(220));
+      lv.add(new Mesh(new BoxGeometry(0.01, 0.11, 0.014).translate(0, 0.055, 0), mats.metal));
+      const k = new Mesh(new BoxGeometry(0.034, 0.02, 0.03).translate(0, 0.12, 0), mats.dark);
+      lv.add(k);
+      ck.group.add(lv);
+      ck.addClick(k, "Speed brake", "Speed brake / ground spoilers ( / key )", () => ck.ac.toggleSpoilers());
+      ck.anim.push(() => {
+        lv.rotation.x = 0.55 - fm.ctl.spoilers * 1;
+      });
+    }
+    if (spec.aero && spec.aero.flaps.length > 1) {
+      const lv = new Group();
+      lv.position.set(cxW + (0.5 - 62 / cw) * pedW, surfY(lzOf(220)), pedZ + lzOf(220));
+      lv.add(new Mesh(new BoxGeometry(0.01, 0.11, 0.014).translate(0, 0.055, 0), mats.metal));
+      const k = new Mesh(new BoxGeometry(0.04, 0.024, 0.03).translate(0, 0.12, 0), mats.knobWhite);
+      lv.add(k);
+      ck.group.add(lv);
+      ck.addClick(k, "Flap lever", "Flap lever: [ / ] keys. Click to extend one step, right-click to retract", (b) => ck.ac.flaps(b === 2 ? -1 : 1));
+      const nf = spec.aero.flaps.length - 1;
+      ck.anim.push(() => {
+        lv.rotation.x = -0.6 + fm.ctl.flapIndex / nf * 1.15;
+      });
+    }
+    {
+      const pz2 = lzOf(1137);
+      const h2 = new Mesh(new BoxGeometry(0.07, 0.016, 0.03), new M({ color: 9050650, roughness: 0.5, emissive: 16719888, emissiveIntensity: 0 }));
+      h2.position.set(cxW + (425 / cw - 0.5) * pedW, surfY(pz2) + 0.01, pedZ + pz2);
+      ck.group.add(h2);
+      ck.addClick(h2, "Parking brake", "Parking brake (Shift+B)", () => {
+        fm.ctl.parking = !fm.ctl.parking;
+      });
+      ck.anim.push(() => {
+        h2.material.emissiveIntensity = fm.ctl.parking ? 0.6 : 0;
+        h2.position.y = surfY(pz2) + (fm.ctl.parking ? 0.018 : 8e-3);
+      });
+    }
+    const ovW = Math.min(0.96, gap * 0.88), ovL = 0.95;
+    const ovFrontZ = eye.z - 0.68, ovBackZ = ovFrontZ + ovL;
+    const ovFrontY = eye.y + 0.25, ovBackY = eye.y + 0.45;
+    const sh = ck.ac.model.shape;
+    const roof = Math.min(sh.topY(ovFrontZ), sh.topY(ovBackZ)) - 0.06;
+    const dy = Math.max(0, Math.max(ovFrontY, ovBackY) - roof);
+    const oSlope = Math.atan2(ovBackY - ovFrontY, ovL);
+    const ovMat = glowMat(overheadTexture(5), "#bcd8ff", "#ffffff", 0.85);
+    const ovGeo = new PlaneGeometry(ovW, ovL).rotateX(Math.PI / 2);
+    batch.add(ovMat, ovGeo, new Vector3(cxW, (ovFrontY + ovBackY) / 2 - dy, (ovFrontZ + ovBackZ) / 2), new Euler(-oSlope, 0, 0));
+    batch.add(mats.dark, new BoxGeometry(ovW + 0.04, 0.05, ovL + 0.02), new Vector3(cxW, (ovFrontY + ovBackY) / 2 - dy + 0.027, (ovFrontZ + ovBackZ) / 2), new Euler(-oSlope, 0, 0));
+    const ovY = (z) => ovFrontY - dy + (z - ovFrontZ) * Math.tan(oSlope);
+    const og = new Group();
+    const ogZ = ovFrontZ + ovL * 0.52;
+    og.position.set(cxW, ovY(ogZ) - 3e-3, ogZ);
+    og.rotation.x = Math.PI / 2 - oSlope;
+    ck.group.add(og);
+    ck.overhead = og;
+    const list = ck.switchList();
+    const cols = Math.min(8, list.length);
+    const bw = Math.min(0.085, (ovW - 0.06) / cols - 8e-3);
+    list.forEach(([lbl, tip, get, set], i) => {
+      const x = -ovW / 2 + 0.04 + i % cols * (bw + 8e-3) + bw / 2;
+      const y = Math.floor(i / cols) * 0.045;
+      ck.button(og, x, y, bw, 0.034, lbl, tip, () => set(!get()), "#1f252c", get);
+    });
+    fm.engines.forEach((e, i) => ck.button(og, -ovW / 2 + 0.06 + i * 0.09, 0.115, 0.08, 0.034, "START " + (i + 1), `Engine ${i + 1} start (I = auto start all)`, () => {
+      sys.battery = true;
+      sys.ignition = true;
+      sys.fuelPumps = true;
+      e.fuelCutoff = false;
+      e.requestStart();
+    }, "#1d2a1d", () => e.state === "cranking" || e.state === "lightoff"));
+    const plate = new Mesh(new BoxGeometry(ovW - 0.02, 0.2, 6e-3), mats.dark);
+    plate.position.set(0, 0.07, -2e-3);
+    og.add(plate);
+    const conMat = new M({ color: 2435890, roughness: 0.8 });
+    for (const sx of [eye.x, eye.x + (eye.x < 0 ? gap : -gap)]) {
+      const out = Math.sign(sx - cxW) || -1;
+      const x = sx + out * 0.36;
+      batch.add(conMat, new BoxGeometry(0.2, 0.09, 0.8), new Vector3(x, eye.y - 0.6, eye.z - 0.1));
+      batch.add(conMat, new BoxGeometry(0.06, eye.y - 0.65 - floorY, 0.8), new Vector3(x + out * 0.07, floorY + (eye.y - 0.65 - floorY) / 2, eye.z - 0.1));
+      batch.add(mats.black, new CylinderGeometry(0.05, 0.05, 0.015, 18), new Vector3(x, eye.y - 0.548, eye.z - 0.32));
+      batch.add(mats.metal, new CylinderGeometry(8e-3, 8e-3, 0.04, 8), new Vector3(x + 0.035, eye.y - 0.53, eye.z - 0.32));
+    }
+    const seatMat = new M({ color: 5988713, roughness: 0.98 });
+    const shellMat = new M({ color: 2303788, roughness: 0.6, metalness: 0.2 });
+    for (const sx of [eye.x, eye.x + (eye.x < 0 ? gap : -gap)]) {
+      const z = eye.z + 0.3, fy = floorY;
+      batch.add(seatMat, new BoxGeometry(0.48, 0.1, 0.48), new Vector3(sx, fy + 0.46, z));
+      batch.add(seatMat, new BoxGeometry(0.46, 0.66, 0.1), new Vector3(sx, fy + 0.86, z + 0.27), new Euler(-0.14, 0, 0));
+      batch.add(seatMat, new BoxGeometry(0.28, 0.2, 0.1), new Vector3(sx, fy + 1.3, z + 0.33), new Euler(-0.08, 0, 0));
+      batch.add(shellMat, new BoxGeometry(0.5, 0.72, 0.06), new Vector3(sx, fy + 0.86, z + 0.33), new Euler(-0.14, 0, 0));
+      for (const s of [-1, 1]) batch.add(shellMat, new BoxGeometry(0.06, 0.05, 0.36), new Vector3(sx + s * 0.27, fy + 0.66, z + 0.04));
+      batch.add(shellMat, new BoxGeometry(0.34, 0.4, 0.34), new Vector3(sx, fy + 0.2, z));
+    }
+    batch.build(ck.group);
+  }
 
   // src/cockpit/cockpit.js
   var TAU4 = Math.PI * 2;
@@ -42788,8 +43483,18 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.lightMats = [];
       this.faceMats = [];
       const pbr = settings.g.pbr;
-      const M = pbr ? MeshStandardMaterial : MeshLambertMaterial;
+      const M = pbr ? MeshStandardMaterial : class extends MeshLambertMaterial {
+        constructor(p = {}) {
+          const q = { ...p };
+          delete q.roughness;
+          delete q.metalness;
+          delete q.envMapIntensity;
+          super(q);
+        }
+      };
       this.M = M;
+      this.glowMats = [];
+      this.modern = !!this.layout.modern;
       const L2 = this.layout;
       this.mats = {
         interior: new M({ color: new Color(L2.interior || "#7a7f86"), roughness: 0.85, metalness: 0.05, side: DoubleSide }),
@@ -42810,12 +43515,11 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.buildShell();
       this.buildPanel();
       this.buildControls();
-      this.buildSeats();
+      if (this.modern) {
+        buildModernDeck(this);
+        if (this.layout.controls.fireHandles) this.fireHandles();
+      } else this.buildSeats();
       if (desc.cabin) this.buildCabin();
-      this.flood = new PointLight(16767144, 0, 3.5, 1.5);
-      this.flood.position.set(this.eye.x + 0.3, this.eye.y + 0.25, this.eye.z - 0.2);
-      this.flood.layers.set(LAYER_OWN);
-      this.group.add(this.flood);
       this.fill = new AmbientLight(14213354, 0.35);
       this.group.add(this.fill);
       this.group.traverse((o) => {
@@ -42826,8 +43530,6 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         }
       });
       this.cabin.traverse((o) => o.layers.set(LAYER_OWN));
-      this.flood.layers.enableAll();
-      this.fill.layers.enableAll();
     }
     // ------------------------------------------------------------ shell & windows
     buildShell() {
@@ -42913,13 +43615,17 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       knee.position.set(0, -P.h / 2 - 0.1, -0.06);
       knee.rotation.x = 0.35;
       frame2.add(knee);
-      if (L2.glare) {
+      if (L2.glare && this.modern) {
+        if (L2.glare.mcp && this.ac.ap.available) this.buildMCP(frame2, P, true);
+        this.buildMasterLights(frame2, P);
+        if (L2.glare.hud && this.ac.model.desc.cockpit) this.buildHUD();
+      } else if (L2.glare) {
         const g = L2.glare;
         const gs = new Mesh(new BoxGeometry(P.w + 0.04, 0.035, g.depth), this.mats.glare);
         gs.position.set(0, P.h / 2 + 0.015, -g.depth / 2 + 0.05);
         gs.rotation.x = P.tilt * DEG;
         frame2.add(gs);
-        const lip = new Mesh(new BoxGeometry(P.w + 0.04, 0.06, 0.03), this.mats.glare);
+        const lip = new Mesh(new BoxGeometry(P.w + 0.04, 0.04, 0.03), this.mats.glare);
         lip.position.set(0, P.h / 2 + 0, 0.04);
         frame2.add(lip);
         if (g.mcp && this.ac.ap.available) this.buildMCP(frame2, P);
@@ -43054,13 +43760,24 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       return k;
     }
     // ------------------------------------------------------------ autopilot mode control panel
-    buildMCP(frame2, P) {
+    buildMCP(frame2, P, onHood = false) {
       const ap = this.ac.ap;
       const g = new Group();
-      const w = Math.min(0.9, P.w * 0.62), h2 = 0.07;
-      g.position.set(this.spec.cat === "heli" ? this.eye.x * 0 : 0, P.h / 2 + 0.06, 0.02);
-      g.rotation.x = 0.25;
-      frame2.add(g);
+      let w = this.spec.cat === "heli" ? Math.min(0.5, P.w * 0.42) : Math.min(0.9, P.w * 0.62);
+      const h2 = 0.07;
+      if (onHood) {
+        w = Math.min(0.9, (this.layout.seatGap || 1) - 0.3);
+        const tilt = P.tilt * DEG, eye = this.eye;
+        const topY = eye.y + P.top - P.h / 2 + P.h / 2 * Math.cos(tilt);
+        const topZ = eye.z - P.dist - P.h / 2 * Math.sin(tilt);
+        g.position.set(eye.x + P.cx, topY + 0.012, topZ + 0.05);
+        g.rotation.x = -0.12;
+        this.group.add(g);
+      } else {
+        g.position.set(0, P.h / 2 + 0.03, 0.05);
+        g.rotation.x = 0.55;
+        frame2.add(g);
+      }
       g.add(new Mesh(new BoxGeometry(w, h2, 0.03), this.mats.dark));
       const face2 = new Group();
       face2.position.z = 0.016;
@@ -43176,41 +43893,56 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       }
       const P = this.layout.panel;
       const cx = seats === 2 ? (seatXs[0] + seatXs[1]) / 2 : eye.x;
-      if (C2.throttle === "pedestal") this.pedestal(cx, C2);
+      if (C2.throttle === "pedestal" && !this.modern) this.pedestal(cx, C2);
       else if (C2.throttle === "knobs" || C2.throttle === "single" || C2.throttle === "quadrant3" || C2.throttle === "quadrant6") this.gaThrottle(cx, C2);
       else if (C2.throttle === "sideQuadrant") this.sideQuadrant(eye.x - 0.28);
       if (C2.gear === "lever" && spec.retract) this.gearLever(C2);
-      this.switchPanel(C2.switches);
-      if (C2.fireHandles) this.fireHandles();
+      if (!this.modern) {
+        this.switchPanel(C2.switches);
+        if (C2.fireHandles) this.fireHandles();
+      }
       if (C2.engineer) this.engineerPanel();
     }
     yoke(sx) {
-      const P = this.layout.panel, eye = this.eye;
+      const P = this.layout.panel, eye = this.eye, L2 = this.layout;
+      const big = this.spec.cat === "airliner" || this.spec.cat === "jet";
+      const wy = eye.y - (this.modern ? 0.42 : big ? 0.33 : 0.28), wz = eye.z - (big ? 0.5 : 0.45);
       const col = new Group();
-      const base = new Vector3(sx, eye.y + P.top - P.h * 0.62, eye.z - P.dist + 0.03);
-      col.position.copy(base);
+      col.position.set(sx, wy, wz);
       this.group.add(col);
-      const shaft = new Mesh(new CylinderGeometry(0.016, 0.016, 0.3, 8).rotateX(Math.PI / 2).translate(0, 0, 0.08), this.mats.metal);
-      col.add(shaft);
-      const wheel2 = new Group();
-      wheel2.position.z = this.spec.cat === "airliner" ? 0.26 : 0.21;
-      col.add(wheel2);
-      const big = this.spec.cat === "airliner";
-      const yokeW = big ? 0.34 : 0.3;
-      const horn = new Mesh(new TorusGeometry(yokeW / 2, 0.014, 8, 20, Math.PI * 0.9).rotateZ(Math.PI * 1.05), this.mats.dark);
-      wheel2.add(horn);
-      for (const s of [-1, 1]) {
-        const grip = new Mesh(new CylinderGeometry(0.018, 0.018, 0.11, 8), this.mats.black);
-        grip.position.set(s * yokeW / 2, 0.02, 0);
-        wheel2.add(grip);
+      if (big) {
+        const fy = eye.y - (L2.floorDrop || 1.05);
+        const h2 = wy - fy;
+        const column = new Mesh(new CylinderGeometry(0.022, 0.03, h2, 10).translate(0, -h2 / 2, -0.04), this.mats.dark);
+        column.rotation.x = -0.12;
+        col.add(column);
+        const boot = new Mesh(new CylinderGeometry(0.06, 0.08, 0.12, 12).translate(0, -h2 + 0.06, -0.04), this.mats.black);
+        col.add(boot);
+      } else {
+        const len = Math.max(0.12, P.dist - (eye.z - wz) + 0.02);
+        const shaft = new Mesh(new CylinderGeometry(0.014, 0.014, len, 8).rotateX(Math.PI / 2).translate(0, 0, -len / 2), this.mats.metal);
+        col.add(shaft);
       }
-      const hub = new Mesh(new BoxGeometry(0.09, 0.06, 0.03), this.mats.dark);
+      const wheel2 = new Group();
+      col.add(wheel2);
+      const yokeW = big ? 0.36 : 0.3;
+      const horn = new Mesh(new TorusGeometry(yokeW / 2, 0.016, 8, 24, Math.PI * 0.9).rotateZ(Math.PI * 1.05), this.mats.dark);
+      wheel2.add(horn);
+      for (const sgn of [-1, 1]) {
+        const grip = new Mesh(new CylinderGeometry(0.019, 0.019, 0.12, 8), this.mats.black);
+        grip.position.set(sgn * yokeW / 2, 0.03, 0);
+        wheel2.add(grip);
+        const btn = new Mesh(new CylinderGeometry(8e-3, 8e-3, 0.01, 8), new MeshBasicMaterial({ color: 13119530 }));
+        btn.position.set(sgn * yokeW / 2, 0.095, 0);
+        wheel2.add(btn);
+      }
+      const hub = new Mesh(new BoxGeometry(0.12, 0.07, 0.035), this.mats.dark);
       wheel2.add(hub);
       const fm = this.ac.fm;
       this.addTip(col, "Control yoke: pull/push = pitch (W/S or arrows), turn = roll (A/D)");
       this.anim.push(() => {
         wheel2.rotation.z = -fm.aileron * 0.7;
-        col.position.z = base.z + fm.elevator * 0.07;
+        col.position.z = wz + fm.elevator * 0.07;
       });
     }
     sideYoke(sx, left) {
@@ -43469,8 +44201,9 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         lv.position.y = fm.ctl.gearDown ? -0.03 : 0.03;
       });
     }
-    switchPanel(kind) {
-      const P = this.layout.panel, frame2 = this.frame, sys = this.ac.systems, fm = this.ac.fm, ac = this.ac;
+    // [label, tooltip, get, set] for every interactive systems switch of this aircraft
+    switchList() {
+      const sys = this.ac.systems;
       const L2 = sys.lights;
       const list = [
         ["BATT", "Battery master", () => sys.battery, (v) => {
@@ -43517,6 +44250,11 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       if (this.spec.systems.searchlight) list.push(["SRCH", "Searchlight", () => L2.searchlight, (v) => {
         L2.searchlight = v;
       }]);
+      return list;
+    }
+    switchPanel(kind) {
+      const P = this.layout.panel, frame2 = this.frame, sys = this.ac.systems, fm = this.ac.fm, ac = this.ac;
+      const list = this.switchList();
       if (kind === "overhead" || kind === "overheadSmall") {
         const eye = this.eye;
         const g = new Group();
@@ -43563,13 +44301,20 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         const tex = labelTex("FIRE " + (i + 1), 128, 48, "#5a0c0c", "#fff", 22);
         const mat2 = new MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 16719888, emissiveIntensity: 0 });
         const h2 = new Mesh(new BoxGeometry(0.05, 0.018, 0.025), mat2);
-        h2.position.set(-0.08 + i * 0.055 + (n === 4 ? -0.03 : 0), P.h / 2 + 0.035, 0.08);
-        frame2.add(h2);
+        if (this.modern && this.overhead) {
+          h2.geometry = new BoxGeometry(0.06, 0.03, 0.022);
+          h2.position.set(0.25 - i * 0.07, 0.115, 0.012);
+          this.overhead.add(h2);
+        } else {
+          h2.position.set(-0.08 + i * 0.055 + (n === 4 ? -0.03 : 0), P.h / 2 + 0.035, 0.08);
+          frame2.add(h2);
+        }
         this.addClick(h2, "Fire handle " + (i + 1), `Engine ${i + 1} fire handle: shuts the engine down and discharges the extinguisher`, () => sys.pullFireHandle(i));
+        const z0 = h2.position.z;
         this.anim.push((t) => {
           const e = fm.engines[i];
           mat2.emissiveIntensity = e.fire && !e.extinguished ? Math.sin(t * 10) > 0 ? 1.5 : 0.6 : 0;
-          h2.position.z = e.fuelCutoff && e.extinguished !== void 0 && e.fire === false && e.failed === "fire" ? 0.1 : 0.08;
+          h2.position.z = z0 + (e.fuelCutoff && e.fire === false && e.failed === "fire" ? 0.02 : 0);
         });
       }
     }
@@ -43616,10 +44361,10 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         const X = (z) => (z - sh.zNose) / sh.length * W, Y = (th) => (1 - th / TAU4) * H;
         const wnd = L2.windows;
         if (wnd) {
-          for (const side of [1, -1]) for (const row of wnd.rows || [{ th: wnd.th, z0: wnd.z0, z1: wnd.z1 }]) {
-            const th = side > 0 ? Math.PI / 2 + row.th : TAU4 - Math.PI / 2 - row.th;
+          for (const side of [1, -1]) for (const row2 of wnd.rows || [{ th: wnd.th, z0: wnd.z0, z1: wnd.z1 }]) {
+            const th = side > 0 ? Math.PI / 2 + row2.th : TAU4 - Math.PI / 2 - row2.th;
             const hpx = wnd.h / (TAU4 * (L2.radius || 2)) * H * 0.85, wpx = wnd.w / sh.length * W * 0.85;
-            for (let z = row.z0; z <= row.z1; z += wnd.pitch) {
+            for (let z = row2.z0; z <= row2.z1; z += wnd.pitch) {
               if (wnd.skip && wnd.skip.some(([a, b]) => z > a && z < b)) continue;
               x.beginPath();
               if (x.roundRect) x.roundRect(X(z) - wpx / 2, Y(th) - hpx / 2, wpx, hpx, wpx * 0.4);
@@ -43688,12 +44433,13 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       const hz = settings.g.displayHz;
       for (const g of this.gauges) g.userData.update(data);
       let budget = 2;
-      for (const d of this.displays) {
-        if (budget <= 0) {
-          d.timer = Math.min(d.timer, 1e-3);
-          break;
-        }
-        if (d.update(dt, data, hz)) budget--;
+      const n = this.displays.length;
+      this.rr = ((this.rr || 0) + 1) % Math.max(1, n);
+      for (let k = 0; k < n; k++) {
+        const d = this.displays[(this.rr + k) % n];
+        if (budget > 0) {
+          if (d.update(dt, data, hz)) budget--;
+        } else d.timer -= dt;
       }
       for (const f of this.anim) f(t);
       const night = data.night;
@@ -43702,8 +44448,11 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       for (const m of this.faceMats) {
         if (m.color) m.color.setScalar(lum);
       }
-      this.flood.intensity = night && this.ac.systems.powered ? 0.35 * panel : 0;
-      this.fill.intensity = 0.06 + 0.32 * (data.night ? 0.1 : 1);
+      const pw = this.ac.systems.powered ? 1 : 0;
+      const glow2 = (night ? 0.35 + 0.85 * panel : 0.22) * pw;
+      for (const m of this.glowMats) m.emissiveIntensity = glow2;
+      if (this.ledMat) this.ledMat.color.setHex(pw ? night ? 5082623 : 2507902 : 658966);
+      this.fill.intensity = 0.06 + 0.32 * (data.night ? 0.1 : 1) + (night ? 0.08 * panel * pw : 0);
     }
   };
   function spec_hasReverse(spec) {
@@ -43731,9 +44480,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.offset.position.copy(this.fm.cg).multiplyScalar(-1);
       this.offset.add(this.model.root);
       this.root.add(this.offset);
-      this.cockpit = new Cockpit(this);
-      this.offset.add(this.cockpit.group);
-      this.offset.add(this.cockpit.cabin);
+      this._cockpit = null;
       this.model.root.traverse((o) => o.layers.set(LAYER_OWN));
       scene.add(this.root);
       this.propAngle = this.model.props.map(() => Math.random() * 6);
@@ -43751,7 +44498,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.strobePhase = Math.random();
       if (settings.g.preset !== "low") {
         const sp = new SpotLight(16773596, 0, 900, 0.32, 0.5, 1.3);
-        sp.layers.enableAll();
+        sp.layers.set(LAYER_WORLD);
         const tgt = new Object3D();
         sp.target = tgt;
         const lp = this.model.desc.lights.landing?.[0] || [0, 0, -2];
@@ -43762,6 +44509,18 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         this.landingLight = sp;
       }
       setStartSpeed(settings.c.mode === "simplified" ? 1.8 : 1);
+    }
+    get cockpit() {
+      if (!this._cockpit) {
+        const c = new Cockpit(this);
+        this.offset.add(c.group);
+        this.offset.add(c.cabin);
+        this._cockpit = c;
+      }
+      return this._cockpit;
+    }
+    get hasCockpit() {
+      return !!this._cockpit;
     }
     dispose() {
       this.scene.remove(this.root);
@@ -43926,6 +44685,10 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       ctl.brakeL = br;
       ctl.brakeR = br;
       if (br && ctl.parking && fm.telemetry.gs > 1) ctl.parking = false;
+      if (settings.c.mode === "simplified" && !fm.isHeli && ctl.parking && fm.onGround && Math.max(...ctl.throttle) > 0.6 && fm.engines.some((e) => e.running)) {
+        ctl.parking = false;
+        bus.emit("toast", "Parking brake released (simplified mode)");
+      }
       if (!this.ap.engaged) this.assists.apply(dt, ctl, raw, false);
       else this.assists.apply(dt, ctl, raw, true);
       if (this.ap.engaged && (Math.abs(raw.pitch) > 0.5 || Math.abs(raw.roll) > 0.5)) {
@@ -43981,7 +44744,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         const ct = fm.contacts.find((c) => c.gear === i);
         const comp = ct ? ct.compression : 0;
         u.lower.position.y = -d.len * 0.55 + Math.min(comp, d.len * 0.4);
-        if (d.steer) u.lower.rotation.y = -fm.steer;
+        if (d.steer) u.lower.rotation.y = -fm.steer * (d.pos[2] - fm.cg.z > 0 ? -1 : 1);
         if (ct && ct.wow) this.wheelAngle[i] += (ct.rollSpeed || 0) / Math.max(0.1, d.r) * dt;
         else this.wheelAngle[i] = this.wheelAngle[i] * (1 - dt * 0.4);
         for (const w of u.wheels) w.rotation.x = -this.wheelAngle[i];
@@ -43993,11 +44756,10 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         const rpm = e ? e.visRpm : 0;
         const w = rpm / 60 * Math.PI * 2;
         this.propAngle[i] += w * dt * p.dir;
-        const blur = clamp2((rpm - 350) / 700, 0, 1);
+        const blur = clamp2((rpm - 250) / 400, 0, 1);
         p.spin.rotation.z = -this.propAngle[i];
-        p.disc.material.opacity = blur * (this.view === "cockpit" ? 0.28 : 0.45);
-        for (const b of p.blades) b.visible = blur < 0.98;
-        if (blur > 0.3) p.spin.rotation.z = -(this.propAngle[i] % (Math.PI * 2)) * 0.15;
+        p.disc.material.opacity = blur * (this.view === "cockpit" ? 0.3 : 0.45);
+        for (const b of p.blades) b.visible = blur < 0.85;
       });
       M.fans.forEach((f, i) => {
         const e = fm.engines[f.engine] || fm.engines[i] || fm.engines[0];
@@ -44073,9 +44835,12 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.updateSmoke(dt);
       const inside = viewMode === "cockpit" || viewMode === "cabin";
       M.exterior.visible = !inside;
-      this.cockpit.group.visible = viewMode === "cockpit" || viewMode === "cabin";
-      this.cockpit.cabin.visible = viewMode === "cabin" || viewMode === "cockpit" && false;
-      if (this.cockpit.glass) this.cockpit.glass.visible = viewMode === "cockpit";
+      const ck = inside ? this.cockpit : this._cockpit;
+      if (ck) {
+        ck.group.visible = inside;
+        ck.cabin.visible = viewMode === "cabin";
+        if (ck.glass) ck.glass.visible = viewMode === "cockpit";
+      }
     }
     // ---------------------------------------------------------- smoke / fire particles (non-graphic, cheap)
     makeSmoke() {
@@ -44108,8 +44873,8 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       fm.engines.forEach((e, i) => {
         if (e.fire && !e.extinguished || e.failed && e.damage > 0.3 || e.oilLeak > 0.6 || e.failed === "seize") sources.push(ep[i] || [0, 0, 0]);
       });
-      if (fm.damage.crashed || fm.damage.total > 0.5) sources.push([0, 0.5, 0]);
-      let emit = sources.length ? 70 * dt * sources.length : 0;
+      if ((fm.damage.crashed || fm.damage.total > 0.5) && !fm.damage.fireOut) sources.push([0, 0.5, 0]);
+      let emit = sources.length ? 70 * dt * sources.length * (fm.damage.fireOut ? 0.12 : 1) : 0;
       S2.acc += emit;
       const fwdV = fm.vel;
       while (S2.acc >= 1) {
@@ -45811,6 +46576,9 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         this.units.push(unit);
       });
       this.fire = fm.engines.some((e) => e.fire && !e.extinguished) || fm.damage.crashed || fm.damage.total > 0.45;
+      this.hadFire = this.fire;
+      this.sprayTime = 0;
+      this.extinguishedAt = null;
       bus.emit("rescue:dispatched", { onField, airport: onField ? ap.icao : null, units: this.units.length, reason });
     }
     update(dt, ac, audio2) {
@@ -45851,6 +46619,20 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         }
       }
       audio2 && audio2.setSirens(sirens);
+      const spraying = this.units.filter((u) => u.spray && u.spray.material.uniforms.uOn.value > 0.6).length;
+      if (this.fire && spraying) {
+        this.sprayTime = (this.sprayTime || 0) + dt * spraying;
+        if (this.sprayTime > 14) {
+          for (const e of fm.engines) if (e.fire) {
+            e.fire = false;
+            e.extinguished = true;
+          }
+          fm.damage.fireOut = true;
+          this.fire = false;
+          this.extinguishedAt = this.time;
+          bus.emit("toast", "Fire extinguished");
+        }
+      }
       for (const p of this.people) {
         p.t = (p.t || 0) + dt;
         if (p.target) {
@@ -45880,7 +46662,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       if (!this.completed && arrived === this.units.length && this.time > 20 && this.time - Math.max(...this.units.map((u) => u.arrivedAt || 0)) > 18) {
         this.completed = true;
         const firstArrival = Math.min(...this.units.map((u) => u.arrivedAt || 999));
-        bus.emit("rescue:complete", { responseTime: firstArrival, units: this.units.length, airport: this.airport ? this.airport.icao : null, fire: this.fire });
+        bus.emit("rescue:complete", { responseTime: firstArrival, units: this.units.length, airport: this.airport ? this.airport.icao : null, fire: this.hadFire, extinguished: this.extinguishedAt != null ? this.extinguishedAt - firstArrival : null });
       }
     }
     onArrive(u, ac) {
@@ -46921,17 +47703,17 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       const el = $("emergency");
       el.innerHTML = "";
       el.append(h("h2", {}, "\u26A0 " + e.title), h("p", {}, e.text));
-      const row = h("div", { class: "chips", style: "justify-content:center" });
-      row.append(h("button", { class: "btn2 danger", onclick: () => {
+      const row2 = h("div", { class: "chips", style: "justify-content:center" });
+      row2.append(h("button", { class: "btn2 danger", onclick: () => {
         this.app.atc.declareEmergency(this.app.ac, this.app.weather, "MAYDAY");
         el.classList.add("hidden");
       } }, "Declare MAYDAY"));
-      if (e.type === "fire") row.append(h("button", { class: "btn2", onclick: () => {
+      if (e.type === "fire") row2.append(h("button", { class: "btn2", onclick: () => {
         this.app.ac.systems.pullFireHandle(e.engine);
         el.classList.add("hidden");
       } }, `Pull fire handle ${e.engine + 1}`));
-      row.append(h("button", { class: "btn2", onclick: () => el.classList.add("hidden") }, "Continue"));
-      el.append(row);
+      row2.append(h("button", { class: "btn2", onclick: () => el.classList.add("hidden") }, "Continue"));
+      el.append(row2);
       el.classList.remove("hidden");
       setTimeout(() => el.classList.add("hidden"), 2e4);
       this.app.ac.failure = e;
@@ -47021,7 +47803,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
           this.previewAngle = (this.previewAngle || 0.9) + 4e-3;
           const b = this.previewSize;
           const c = this.previewCam;
-          c.position.set(Math.sin(this.previewAngle) * b * 1.15, b * 0.32, Math.cos(this.previewAngle) * b * 1.15);
+          c.position.set(Math.sin(this.previewAngle) * b * 1.6, b * 0.36, Math.cos(this.previewAngle) * b * 1.6);
           c.lookAt(0, 0, 0);
           this.previewR.render(this.previewScene, c);
         };
@@ -47449,6 +48231,14 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         h(
           "div",
           {},
+          h("div", { class: "field" }, h("label", {}, "Start view"), (() => {
+            const sv = h("select", { onchange: () => {
+              p.startView = sv.value;
+              settings.save();
+            } }, [["cockpit", "Cockpit (seated pilot)"], ["chase", "Chase camera (3rd person)"]].map(([k, v]) => h("option", { value: k, selected: k === (p.startView || "cockpit") }, v)));
+            return sv;
+          })()),
+          h("p", { class: "muted small", style: "line-height:1.5" }, "The cockpit is only built the first time you look inside, so flying from the outside views costs nothing extra."),
           this.check("Flight information overlay (U)", p, "hud"),
           this.check("On-screen control hints", p, "trainingHints"),
           this.check("ATC text messages", p, "atcText")
@@ -47586,7 +48376,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         );
       }
       if (r.mission) blocks.push(h("div", {}, h("h3", {}, "Mission complete: " + r.mission.mission.title), h("div", { class: "statgrid" }, stat(r.mission.minutes.toFixed(1) + " min", "Time"), stat(r.mission.comfort + "%", "Passenger comfort"), stat(r.mission.maxBank + "\xB0", "Max bank"), stat(r.mission.maxG + " g", "Max load"))));
-      if (r.rescue) blocks.push(h("div", {}, h("h3", {}, "Emergency response"), h("p", {}, `Emergency services from ${r.rescue.airport || "the nearest town"} reached the aircraft ${Math.round(r.rescue.responseTime)} s after dispatch with ${r.rescue.units} vehicles${r.rescue.fire ? " and fought the fire" : ""}. All occupants are safe.`)));
+      if (r.rescue) blocks.push(h("div", {}, h("h3", {}, "Emergency response"), h("p", {}, `Emergency services from ${r.rescue.airport || "the nearest town"} reached the aircraft ${Math.round(r.rescue.responseTime)} s after dispatch with ${r.rescue.units} vehicles${r.rescue.fire ? r.rescue.extinguished != null ? `; the fire was put out ${Math.max(1, Math.round(r.rescue.extinguished))} s after the first unit arrived` : " and fought the fire" : ""}. All occupants are safe.`)));
       if (r.summary) {
         const s = r.summary;
         blocks.push(h("div", {}, h("h3", {}, "Flight report"), h("div", { class: "statgrid" }, stat(s.durationMin + " min", "Duration"), stat(s.distanceNm + " nm", "Distance"), stat(s.maxAltFt.toLocaleString() + " ft", "Max altitude"), stat(s.fuelUsedKg + " kg", "Fuel used"))));
@@ -47741,10 +48531,10 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       const s = lesson.steps[i];
       el.innerHTML = "";
       el.append(h("div", { class: "step" }, `${lesson.title} \u2014 step ${i + 1} of ${lesson.steps.length}`), h("p", {}, s.text));
-      const row = h("div", { style: "display:flex;gap:8px;justify-content:flex-end" });
-      if (!s.check || i === lesson.steps.length - 1) row.append(h("button", { class: "btn2 go", onclick: onNext }, i === lesson.steps.length - 1 ? "Finish" : "Next"));
-      else row.append(h("span", { class: "muted small" }, "Complete the action to continue\u2026"), h("button", { class: "btn2", onclick: onNext }, "Skip"));
-      el.append(row);
+      const row2 = h("div", { style: "display:flex;gap:8px;justify-content:flex-end" });
+      if (!s.check || i === lesson.steps.length - 1) row2.append(h("button", { class: "btn2 go", onclick: onNext }, i === lesson.steps.length - 1 ? "Finish" : "Next"));
+      else row2.append(h("span", { class: "muted small" }, "Complete the action to continue\u2026"), h("button", { class: "btn2", onclick: onNext }, "Skip"));
+      el.append(row2);
       el.classList.remove("hidden");
     }
     setTooltip(text, x, y) {
@@ -47987,6 +48777,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       requestAnimationFrame((t) => this.loop(t));
       window.__fs = this;
       window.__fsSettings = settings;
+      window.__fsCatalog = AIRCRAFT_BY_ID;
     }
     // ------------------------------------------------------------ parked aircraft
     buildParked() {
@@ -48043,8 +48834,6 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       a.fm.placeOnGround(-1650, 150, 250);
       a.root.position.copy(a.fm.pos);
       a.root.quaternion.copy(a.fm.q);
-      a.cockpit.group.visible = false;
-      a.cockpit.cabin.visible = false;
       a.model.root.traverse((o) => o.layers.set(LAYER_WORLD));
       this.showcase = a;
       this.showcaseId = spec.id;
@@ -48216,7 +49005,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
         fm.nr = 1;
       }
       for (const p of this.parked) p.obj.visible = Math.hypot(p.x - fm.pos.x, p.z - fm.pos.z) > Math.max(30, spec.dims.span);
-      this.camRig.setMode("cockpit", ac);
+      this.camRig.setMode(settings.p.startView === "chase" ? "chase" : "cockpit", ac);
       this.camRig.resetLook();
       this.ui.loading(0.45, "Loading scenery\u2026");
       await tick();
@@ -48644,7 +49433,7 @@ void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosit
       this.updateWorld(dt, cam.position, ac.root.position);
       const d = ac.instrumentData(this.env, this.atc);
       if (this.camRig.effectiveMode === "cockpit" || this.camRig.effectiveMode === "cabin") ac.cockpit.update(dt, d, performance.now() / 1e3);
-      if (this.highlightKind) for (const g of ac.cockpit.gauges) {
+      if (this.highlightKind && ac.hasCockpit) for (const g of ac.cockpit.gauges) {
         const s = g.userData.kind === this.highlightKind ? 1 + 0.12 * Math.abs(Math.sin(performance.now() / 250)) : 1;
         g.scale.setScalar(s);
       }

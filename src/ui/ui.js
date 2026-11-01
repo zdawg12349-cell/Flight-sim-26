@@ -163,7 +163,7 @@ export class UI {
         this.previewAngle = (this.previewAngle || 0.9) + 0.004;
         const b = this.previewSize;
         const c = this.previewCam;
-        c.position.set(Math.sin(this.previewAngle) * b * 1.15, b * 0.32, Math.cos(this.previewAngle) * b * 1.15);
+        c.position.set(Math.sin(this.previewAngle) * b * 1.6, b * 0.36, Math.cos(this.previewAngle) * b * 1.6);
         c.lookAt(0, 0, 0);
         this.previewR.render(this.previewScene, c);
       };
@@ -420,6 +420,8 @@ export class UI {
         this.check('Start with engines running', p, 'startEnginesRunning'),
         this.check('Crash detection', p, 'crashDetection')),
       h('div', {},
+        h('div', { class: 'field' }, h('label', {}, 'Start view'), (() => { const sv = h('select', { onchange: () => { p.startView = sv.value; settings.save(); } }, [['cockpit', 'Cockpit (seated pilot)'], ['chase', 'Chase camera (3rd person)']].map(([k, v]) => h('option', { value: k, selected: k === (p.startView || 'cockpit') }, v))); return sv; })()),
+        h('p', { class: 'muted small', style: 'line-height:1.5' }, 'The cockpit is only built the first time you look inside, so flying from the outside views costs nothing extra.'),
         this.check('Flight information overlay (U)', p, 'hud'),
         this.check('On-screen control hints', p, 'trainingHints'),
         this.check('ATC text messages', p, 'atcText')));
@@ -502,7 +504,7 @@ export class UI {
         h('ul', { class: 'notes' }, L.notes.map(([t, v]) => h('li', {}, h('span', {}, t), h('span', { class: v < 0 ? 'neg' : v > 0 ? 'pos' : '' }, v ? (v > 0 ? '+' : '') + v : '✓')))));
     }
     if (r.mission) blocks.push(h('div', {}, h('h3', {}, 'Mission complete: ' + r.mission.mission.title), h('div', { class: 'statgrid' }, stat(r.mission.minutes.toFixed(1) + ' min', 'Time'), stat(r.mission.comfort + '%', 'Passenger comfort'), stat(r.mission.maxBank + '°', 'Max bank'), stat(r.mission.maxG + ' g', 'Max load'))));
-    if (r.rescue) blocks.push(h('div', {}, h('h3', {}, 'Emergency response'), h('p', {}, `Emergency services from ${r.rescue.airport || 'the nearest town'} reached the aircraft ${Math.round(r.rescue.responseTime)} s after dispatch with ${r.rescue.units} vehicles${r.rescue.fire ? ' and fought the fire' : ''}. All occupants are safe.`)));
+    if (r.rescue) blocks.push(h('div', {}, h('h3', {}, 'Emergency response'), h('p', {}, `Emergency services from ${r.rescue.airport || 'the nearest town'} reached the aircraft ${Math.round(r.rescue.responseTime)} s after dispatch with ${r.rescue.units} vehicles${r.rescue.fire ? (r.rescue.extinguished != null ? `; the fire was put out ${Math.max(1, Math.round(r.rescue.extinguished))} s after the first unit arrived` : ' and fought the fire') : ''}. All occupants are safe.`)));
     if (r.summary) { const s = r.summary; blocks.push(h('div', {}, h('h3', {}, 'Flight report'), h('div', { class: 'statgrid' }, stat(s.durationMin + ' min', 'Duration'), stat(s.distanceNm + ' nm', 'Distance'), stat(s.maxAltFt.toLocaleString() + ' ft', 'Max altitude'), stat(s.fuelUsedKg + ' kg', 'Fuel used')))); }
     if (r.crash) blocks.unshift(h('h2', { style: 'color:var(--bad)' }, 'Crash — ' + r.crash));
     const d = h('div', { class: 'panel dialog', style: 'height:auto;max-height:92vh' },

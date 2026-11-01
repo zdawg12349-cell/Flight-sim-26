@@ -103,7 +103,7 @@ function defaults() {
     },
     gameplay: {
       emergencyFrequency: 'rare', units: 'aviation', hud: true, trainingHints: true, crashDetection: true,
-      startEnginesRunning: true, atcText: true,
+      startEnginesRunning: true, atcText: true, startView: 'cockpit',
       assists: { autoRudder: true, autoTrim: true, stallProtection: true, heliStability: true, autoMixture: true },
     },
     last: { aircraft: 'skylark', airport: 'KPXR', spawn: 'runway', weather: 'clear', time: 10.5, season: 'summer' },

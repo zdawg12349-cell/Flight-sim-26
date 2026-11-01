@@ -37,7 +37,8 @@ class EngineBase {
     this.roughPhase = Math.random() * 10;
     this.extinguished = false;
   }
-  setRunningInstant(oat) { this.running = true; this.state = 'running'; }
+  // engine already running at idle (spawn with engines running / airborne): oil pressure established
+  setRunningInstant(oat) { this.running = true; this.state = 'running'; this.oilP = (this.oilPmax || 60) * 0.72; }
   fail(type) {
     this.failed = type;
     if (type === 'fire') { this.fire = true; }
@@ -249,7 +250,7 @@ export class Piston extends EngineBase {
     this.kq = this.Pmax * 0.93 / (2 * Math.PI * n) / (1.225 * n * n * Math.pow(this.prop.diam, 5));
     this.cht = 15;
   }
-  setRunningInstant() { super.setRunningInstant(); this.omega = 800 / 60 * 2 * Math.PI; this.oilT = 60; this.cht = 140; this.egt = 600; this.fuelCutoff = false; }
+  setRunningInstant() { super.setRunningInstant(); this.omega = 800 / 60 * 2 * Math.PI; this.rpm = this.visRpm = 800; this.n1 = this.n2 = 800 / this.rpmMax; this.oilT = 60; this.cht = 140; this.egt = 600; this.fuelCutoff = false; }
   spinFrac() { return clamp(this.rpm / this.rpmMax, 0, 1.2); }
   update(dt, env) {
     const s = START_FAST.value;
@@ -392,7 +393,7 @@ export class PistonHeli extends EngineBase {
     this.powerCmd = 0; this.rotorFrac = 0; this.flight = 1; this.oilPmax = 75;
     this.crankRpm = 0;
   }
-  setRunningInstant() { super.setRunningInstant(); this.oilT = 60; this.cht = 140; this.egt = 620; this.fuelCutoff = false; this.crankRpm = 0; }
+  setRunningInstant() { super.setRunningInstant(); this.oilT = 60; this.cht = 140; this.egt = 620; this.fuelCutoff = false; this.crankRpm = 0; this.rpm = this.visRpm = this.rpmMax; this.n1 = this.n2 = 1; }
   spinFrac() { return clamp(this.rpm / this.rpmMax, 0, 1.2); }
   update(dt, env) {
     const s = START_FAST.value;

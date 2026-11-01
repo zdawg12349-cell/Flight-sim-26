@@ -186,6 +186,24 @@ export class Assists {
       if (margin < 3) ctl.pitch = Math.min(ctl.pitch, -0.15 + margin * 0.12) - (margin < 0 ? 0.25 : 0);
       if (margin < 3) ctl.trim = Math.min(ctl.trim, this.trimI = Math.min(this.trimI, 0));
     }
+    // ground roll: damp yaw (catches the ground-loop tendency of taildraggers) and hold the heading
+    // the pilot was tracking when the rudder keys are released
+    if (simplified && a.autoRudder && fm.onGround && t.gs > 4) {
+      if (Math.abs(raw.yaw) < 0.05) {
+        if (this.holdHdg === null) this.holdHdg = t.heading;
+        const err = ((t.heading - this.holdHdg + 540) % 360) - 180;
+        ctl.yaw = clamp(ctl.yaw - err * 0.05 + fm.w.y * 2.2, -1, 1);
+      } else {
+        this.holdHdg = null;
+        ctl.yaw = clamp(ctl.yaw + fm.w.y * 1.2, -1, 1);
+      }
+    } else if (!fm.onGround || t.gs <= 4) this.holdHdg = null;
+    // taildraggers: hold the stick back on the ground at low speed (as a pilot would) so that power
+    // against the brakes or a hard brake application does not tip the aircraft onto its propeller
+    if (simplified && this.spec.gearType === 'taildragger' && fm.onGround && raw.pitch > -0.3) {
+      const k = clamp(1 - (t.ias / 0.5144 - 20) / 15, 0, 1);       // full below 20 kt, released by 35 kt
+      ctl.pitch = Math.max(ctl.pitch, 0.75 * k);
+    }
     // differential braking for castering nose wheels
     if (this.spec.castering && fm.onGround && Math.abs(raw.yaw) > 0.1) {
       if (raw.yaw > 0) ctl.brakeR = Math.max(ctl.brakeR, raw.yaw * 0.6); else ctl.brakeL = Math.max(ctl.brakeL, -raw.yaw * 0.6);

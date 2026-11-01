@@ -33,9 +33,9 @@ export class Aircraft {
     this.offset.position.copy(this.fm.cg).multiplyScalar(-1);
     this.offset.add(this.model.root);
     this.root.add(this.offset);
-    this.cockpit = new Cockpit(this);
-    this.offset.add(this.cockpit.group);
-    this.offset.add(this.cockpit.cabin);
+    // The first-person cockpit (and cabin) is built lazily the first time an inside view is used,
+    // so flying from the outside views never pays for its geometry, textures or displays.
+    this._cockpit = null;
     this.model.root.traverse((o) => o.layers.set(LAYER_OWN));
     scene.add(this.root);
     this.propAngle = this.model.props.map(() => Math.random() * 6);
@@ -54,7 +54,8 @@ export class Aircraft {
     // landing light spot (one per player aircraft, medium+ quality)
     if (settings.g.preset !== 'low') {
       const sp = new THREE.SpotLight(0xfff1dc, 0, 900, 0.32, 0.5, 1.3);
-      sp.layers.enableAll();
+      // world layer only: it lights the runway and terrain, never the cockpit interior pass
+      sp.layers.set(LAYER_WORLD);
       const tgt = new THREE.Object3D();
       sp.target = tgt;
       const lp = this.model.desc.lights.landing?.[0] || [0, 0, -2];
@@ -65,6 +66,17 @@ export class Aircraft {
     }
     setStartSpeed(settings.c.mode === 'simplified' ? 1.8 : 1);
   }
+
+  get cockpit() {
+    if (!this._cockpit) {
+      const c = new Cockpit(this);
+      this.offset.add(c.group);
+      this.offset.add(c.cabin);
+      this._cockpit = c;
+    }
+    return this._cockpit;
+  }
+  get hasCockpit() { return !!this._cockpit; }
 
   dispose() {
     this.scene.remove(this.root);
@@ -179,6 +191,11 @@ export class Aircraft {
     const br = (!controlsLocked && input.held('brakes')) || gp.brake > 0 ? 1 : 0;
     ctl.brakeL = br; ctl.brakeR = br;
     if (br && ctl.parking && fm.telemetry.gs > 1) ctl.parking = false;
+    // simplified mode: advancing the throttle on the ground releases a forgotten parking brake
+    if (settings.c.mode === 'simplified' && !fm.isHeli && ctl.parking && fm.onGround && Math.max(...ctl.throttle) > 0.6 && fm.engines.some((e) => e.running)) {
+      ctl.parking = false;
+      bus.emit('toast', 'Parking brake released (simplified mode)');
+    }
     // assists (simplified mode) and autopilot
     if (!this.ap.engaged) this.assists.apply(dt, ctl, raw, false);
     else this.assists.apply(dt, ctl, raw, true);
@@ -228,7 +245,7 @@ export class Aircraft {
       const ct = fm.contacts.find((c) => c.gear === i);
       const comp = ct ? ct.compression : 0;
       u.lower.position.y = -d.len * 0.55 + Math.min(comp, d.len * 0.4);
-      if (d.steer) u.lower.rotation.y = -fm.steer;
+      if (d.steer) u.lower.rotation.y = -fm.steer * ((d.pos[2] - fm.cg.z) > 0 ? -1 : 1);
       if (ct && ct.wow) this.wheelAngle[i] += (ct.rollSpeed || 0) / Math.max(0.1, d.r) * dt;
       else this.wheelAngle[i] = this.wheelAngle[i] * (1 - dt * 0.4);
       for (const w of u.wheels) w.rotation.x = -this.wheelAngle[i];
@@ -242,11 +259,12 @@ export class Aircraft {
       const w = rpm / 60 * Math.PI * 2;
       this.propAngle[i] += w * dt * p.dir;
       // stroboscopic aliasing guard: show a blurred disc at speed, blades fade out
-      const blur = clamp((rpm - 350) / 700, 0, 1);
+      // individual blades are visible while the engine cranks / winds down; above ~600 rpm the
+      // eye only sees a translucent disc (the blades are hidden to avoid stroboscopic aliasing)
+      const blur = clamp((rpm - 250) / 400, 0, 1);
       p.spin.rotation.z = -this.propAngle[i];
-      p.disc.material.opacity = blur * (this.view === 'cockpit' ? 0.28 : 0.45);
-      for (const b of p.blades) b.visible = blur < 0.98;
-      if (blur > 0.3) p.spin.rotation.z = -(this.propAngle[i] % (Math.PI * 2)) * 0.15;
+      p.disc.material.opacity = blur * (this.view === 'cockpit' ? 0.3 : 0.45);
+      for (const b of p.blades) b.visible = blur < 0.85;
     });
     // turbofan fans
     M.fans.forEach((f, i) => {
@@ -317,9 +335,12 @@ export class Aircraft {
     // view-dependent visibility
     const inside = viewMode === 'cockpit' || viewMode === 'cabin';
     M.exterior.visible = !inside;
-    this.cockpit.group.visible = viewMode === 'cockpit' || viewMode === 'cabin';
-    this.cockpit.cabin.visible = viewMode === 'cabin' || (viewMode === 'cockpit' && false);
-    if (this.cockpit.glass) this.cockpit.glass.visible = viewMode === 'cockpit';
+    const ck = inside ? this.cockpit : this._cockpit;       // builds on first inside view
+    if (ck) {
+      ck.group.visible = inside;
+      ck.cabin.visible = viewMode === 'cabin';
+      if (ck.glass) ck.glass.visible = viewMode === 'cockpit';
+    }
   }
 
   // ---------------------------------------------------------- smoke / fire particles (non-graphic, cheap)
@@ -352,8 +373,9 @@ export class Aircraft {
     fm.engines.forEach((e, i) => {
       if ((e.fire && !e.extinguished) || (e.failed && e.damage > 0.3) || e.oilLeak > 0.6 || (e.failed === 'seize')) sources.push(ep[i] || [0, 0, 0]);
     });
-    if (fm.damage.crashed || fm.damage.total > 0.5) sources.push([0, 0.5, 0]);
-    let emit = sources.length ? 70 * dt * sources.length : 0;
+    if ((fm.damage.crashed || fm.damage.total > 0.5) && !fm.damage.fireOut) sources.push([0, 0.5, 0]);
+    // after the fire is out only a thin wisp of smoke remains
+    let emit = sources.length ? 70 * dt * sources.length * (fm.damage.fireOut ? 0.12 : 1) : 0;
     S.acc += emit;
     const fwdV = fm.vel;
     while (S.acc >= 1) {

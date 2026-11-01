@@ -93,6 +93,7 @@ class App {
     requestAnimationFrame((t) => this.loop(t));
     window.__fs = this;    // debugging / automated tests
     window.__fsSettings = settings;
+    window.__fsCatalog = AIRCRAFT_BY_ID;
   }
 
   // ------------------------------------------------------------ parked aircraft
@@ -138,7 +139,6 @@ class App {
     const a = new Aircraft(spec, this.world, this.weather, this.renderer.scene);
     a.fm.placeOnGround(-1650, 150, 250);
     a.root.position.copy(a.fm.pos); a.root.quaternion.copy(a.fm.q);
-    a.cockpit.group.visible = false; a.cockpit.cabin.visible = false;
     a.model.root.traverse((o) => o.layers.set(LAYER_WORLD));
     this.showcase = a;
     this.showcaseId = spec.id;
@@ -290,8 +290,8 @@ class App {
     if (airborne && spec.cat === 'heli') { fm.omega = fm.omegaN; fm.nr = 1; }
     // hide parked aircraft we would overlap
     for (const p of this.parked) p.obj.visible = Math.hypot(p.x - fm.pos.x, p.z - fm.pos.z) > Math.max(30, spec.dims.span);
-    // camera: seated pilot perspective by default
-    this.camRig.setMode('cockpit', ac);
+    // camera: seated pilot perspective by default (or the outside view chosen in Settings)
+    this.camRig.setMode(settings.p.startView === 'chase' ? 'chase' : 'cockpit', ac);
     this.camRig.resetLook();
     this.ui.loading(0.45, 'Loading scenery…'); await tick();
     await this.terrain.preload(fm.pos, airborne ? 300 : 2, (p) => this.ui.loading(0.45 + p * 0.25, 'Loading scenery…'));
@@ -608,7 +608,7 @@ class App {
     // instruments
     const d = ac.instrumentData(this.env, this.atc);
     if (this.camRig.effectiveMode === 'cockpit' || this.camRig.effectiveMode === 'cabin') ac.cockpit.update(dt, d, performance.now() / 1000);
-    if (this.highlightKind) for (const g of ac.cockpit.gauges) { const s = g.userData.kind === this.highlightKind ? 1 + 0.12 * Math.abs(Math.sin(performance.now() / 250)) : 1; g.scale.setScalar(s); }
+    if (this.highlightKind && ac.hasCockpit) for (const g of ac.cockpit.gauges) { const s = g.userData.kind === this.highlightKind ? 1 + 0.12 * Math.abs(Math.sin(performance.now() / 250)) : 1; g.scale.setScalar(s); }
     this.audio.update(dt, ac, cam, this.camRig.effectiveMode, this.weather);
     this.ui.updateHud(ac, this.camRig.effectiveMode, dt);
     this.ui.drawMap(ac);

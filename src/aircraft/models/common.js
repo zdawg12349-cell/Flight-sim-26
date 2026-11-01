@@ -188,6 +188,16 @@ export const PIc = PI;
 // degrees) and ray-projected onto the fuselage surface, returning polygons in (z, theta) fuselage space
 // that are used both for the exterior painted glass and the cut-outs of the cockpit interior shell.
 function projectDir(shape, eye, az, el) {
+  const P = hitPoint(shape, eye, az, el);
+  const s = shape.at(P[2]);
+  const sx = Math.sign(P[0]) * Math.pow(Math.min(1, Math.abs(P[0]) / Math.max(1e-3, s.w)), s.e / 2);
+  const cy = -Math.sign(P[1] - s.y) * Math.pow(Math.min(1, Math.abs(P[1] - s.y) / Math.max(1e-3, s.h)), s.e / 2);
+  let th = Math.atan2(sx, cy);
+  if (th < 0) th += 2 * PI;
+  return [P[2], th];
+}
+
+function hitPoint(shape, eye, az, el) {
   const a = az * PI / 180, e = el * PI / 180;
   const dx = Math.sin(a) * Math.cos(e), dy = Math.sin(e), dz = -Math.cos(a) * Math.cos(e);
   let t0 = 0, t1 = 0, P = [eye[0], eye[1], eye[2]];
@@ -205,18 +215,30 @@ function projectDir(shape, eye, az, el) {
   for (let k = 0; k < 12; k++) { const m = (t0 + t1) / 2; if (inside(eye[0] + dx * m, eye[1] + dy * m, eye[2] + dz * m)) t0 = m; else t1 = m; }
   const t = (t0 + t1) / 2;
   P = [eye[0] + dx * t, eye[1] + dy * t, Math.max(shape.zNose, Math.min(shape.zTail, eye[2] + dz * t))];
-  const s = shape.at(P[2]);
-  const sx = Math.sign(P[0]) * Math.pow(Math.min(1, Math.abs(P[0]) / Math.max(1e-3, s.w)), s.e / 2);
-  const cy = -Math.sign(P[1] - s.y) * Math.pow(Math.min(1, Math.abs(P[1] - s.y) / Math.max(1e-3, s.h)), s.e / 2);
-  let th = Math.atan2(sx, cy);
-  if (th < 0) th += 2 * PI;
-  return [P[2], th];
+  return P;
+}
+
+// Azimuth (from a left-seat eye) at which the line of sight meets the fuselage at x = -halfPost,
+// i.e. the inner edge of a windscreen that ends at a centre post.
+function azToCentre(shape, eye, el, halfPost) {
+  let lo = -10, hi = 75;
+  for (let k = 0; k < 24; k++) {
+    const m = (lo + hi) / 2;
+    if (hitPoint(shape, eye, m, el)[0] < -halfPost) lo = m; else hi = m;
+  }
+  return (lo + hi) / 2;
 }
 
 function projectRect(shape, eye, r) {
-  const [a0, a1] = r.az, [e0, e1] = r.el;
+  const [a0, a1r] = r.az, [e0, e1] = r.el;
+  const a1 = a1r;
   const tp = (r.taper || 0) * (a1 - a0) / 2;
   const corners = [[a0, e0], [a1, e0], [a1 - tp, e1], [a0 + tp, e1]];
+  if (r.post !== undefined && eye[0] < 0) {
+    // inner edge runs up the centre post
+    corners[1][0] = azToCentre(shape, eye, e0, r.post);
+    corners[2][0] = azToCentre(shape, eye, e1, r.post);
+  }
   const poly = [];
   for (let i = 0; i < 4; i++) {
     const [ax, ay] = corners[i], [bx, by] = corners[(i + 1) % 4];
@@ -235,15 +257,15 @@ const GLAZING = {
   gaHighRoof: [{ c: true, az: [-58, 58], el: [-13, 20], taper: 0.1 }, { az: [-118, -62], el: [-34, 22] }, { az: [-152, -124], el: [-18, 15] }, { c: true, az: [-22, 22], el: [40, 70] }],
   gaLow: [{ c: true, az: [-58, 58], el: [-12, 25], taper: 0.12 }, { az: [-120, -62], el: [-22, 32] }, { az: [-152, -126], el: [-12, 18] }],
   vlj: [{ c: true, az: [-58, 58], el: [-11, 22], taper: 0.15 }, { az: [-112, -63], el: [-18, 24] }, { az: [-150, -118], el: [-10, 14] }],
-  commuter: [{ az: [-46, -3], el: [-12, 16], taper: 0.08 }, { az: [-95, -50], el: [-18, 12] }],
-  airliner: [{ az: [-37, -2], el: [-15, 17], taper: 0.1 }, { az: [-72, -41], el: [-16, 13] }, { az: [-104, -76], el: [-13, 9] }],
-  regional: [{ az: [-40, -2], el: [-15, 16], taper: 0.08 }, { az: [-75, -44], el: [-17, 12] }, { az: [-104, -79], el: [-13, 9] }],
-  bizjet: [{ az: [-40, -2], el: [-13, 17], taper: 0.1 }, { az: [-82, -44], el: [-16, 12] }],
-  sst: [{ az: [-24, -2], el: [-8, 9] }, { az: [-62, -28], el: [-10, 8] }],
+  commuter: [{ az: [-46, -3], el: [-12, 16], taper: 0.08, post: 0.035 }, { az: [-95, -50], el: [-18, 12] }],
+  airliner: [{ az: [-37, -2], el: [-15, 17], taper: 0.1, post: 0.04 }, { az: [-72, -41], el: [-16, 13] }, { az: [-104, -76], el: [-13, 9] }],
+  regional: [{ az: [-40, -2], el: [-15, 16], taper: 0.08, post: 0.04 }, { az: [-75, -44], el: [-17, 12] }, { az: [-104, -79], el: [-13, 9] }],
+  bizjet: [{ az: [-40, -2], el: [-13, 17], taper: 0.1, post: 0.035 }, { az: [-82, -44], el: [-16, 12] }],
+  sst: [{ az: [-24, -2], el: [-8, 9], post: 0.05 }, { az: [-62, -28], el: [-10, 8] }],
   heliBubble: [{ c: true, az: [-82, 82], el: [-62, 42], taper: 0.25 }, { az: [-142, -86], el: [-48, 30] }],
   heliGlass: [{ c: true, az: [-62, 62], el: [-24, 28], taper: 0.12 }, { c: true, az: [-38, 38], el: [-68, -30] }, { az: [-128, -66], el: [-42, 22] }],
   heliUtility: [{ c: true, az: [-64, 64], el: [-24, 30], taper: 0.12 }, { c: true, az: [-40, 40], el: [-70, -30] }, { az: [-130, -68], el: [-44, 24] }, { c: true, az: [-26, 26], el: [36, 62] }],
-  heliHeavy: [{ az: [-50, -3], el: [-28, 22] }, { az: [-100, -54], el: [-36, 16] }, { az: [-40, -6], el: [-66, -33] }],
+  heliHeavy: [{ az: [-50, -3], el: [-28, 22], post: 0.04 }, { az: [-100, -54], el: [-36, 16] }, { az: [-40, -6], el: [-66, -33] }],
 };
 
 // Returns a function (shape, eye) -> [{poly}] used by the assembler once the fuselage exists.

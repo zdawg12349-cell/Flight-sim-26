@@ -422,6 +422,42 @@ export class Display {
     if (d.stall) { x.font = 'bold 30px Arial'; x.fillText('AOA', cx, cy + 120); }
   }
 
+  // ------------------------------------------------------------ CDU / FMS (route legs page)
+  draw_cdu(x, d) {
+    x.fillStyle = '#040506'; x.fillRect(0, 0, 512, 512);
+    x.textBaseline = 'middle';
+    const row = (i) => 70 + i * 52;
+    x.font = 'bold 34px monospace'; x.fillStyle = C.white; x.textAlign = 'center';
+    x.fillText(d.ap && d.ap.engaged ? 'ACT RTE 1 LEGS' : 'RTE 1 LEGS', 256, 30);
+    x.textAlign = 'right'; x.font = '26px monospace'; x.fillText('1/2', 500, 30);
+    x.textAlign = 'left';
+    const dest = d.dest;
+    const distNm = dest ? dest.dist / 1852 : 0;
+    const ete = dest && d.gsKt > 30 ? distNm / d.gsKt * 60 : null;
+    const lines = [];
+    if (dest) {
+      const brg = (Math.atan2(dest.x - d.x, -(dest.z - d.z)) * 180 / Math.PI + 360) % 360;
+      lines.push(['DIRECT', `${String(Math.round(brg)).padStart(3, '0')}°`, C.white]);
+      lines.push([dest.icao || 'DEST', `${distNm.toFixed(1)}NM`, C.magenta]);
+      lines.push(['ETE', ete != null ? `${Math.floor(ete / 60)}+${String(Math.round(ete % 60)).padStart(2, '0')}` : '----', C.green]);
+    } else {
+      lines.push(['NO ROUTE', '', C.amber]);
+      lines.push(['', '', C.white]);
+      lines.push(['', '', C.white]);
+    }
+    const cruise = d.apState ? d.apState.alt : 0;
+    lines.push(['CRZ ALT', cruise >= 18000 ? 'FL' + Math.round(cruise / 100) : String(Math.round(cruise)), C.cyan]);
+    lines.push(['FUEL', `${(d.fuelKg / 1000).toFixed(1)}T`, C.white]);
+    lines.push(['GW', `${(d.massKg / 1000).toFixed(1)}T`, C.white]);
+    lines.push(['SPD/MACH', d.mach > 0.5 ? '.' + Math.round(d.mach * 100) : String(Math.round(d.iasKt)), C.green]);
+    lines.forEach(([l, r, col], i) => {
+      x.font = '22px monospace'; x.fillStyle = C.grey; x.fillText(l, 18, row(i) - 14);
+      x.font = 'bold 34px monospace'; x.fillStyle = col; x.textAlign = 'right'; x.fillText(r, 494, row(i) + 10); x.textAlign = 'left';
+    });
+    x.fillStyle = C.white; x.font = 'bold 28px monospace';
+    x.fillText('<INDEX', 14, 480); x.textAlign = 'right'; x.fillText('ROUTE>', 498, 480); x.textAlign = 'left';
+  }
+
   // ------------------------------------------------------------ standby instrument (small, always powered)
   draw_standby(x, d) {
     x.fillStyle = C.dark; x.fillRect(0, 0, 512, 512);

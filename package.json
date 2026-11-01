@@ -4,10 +4,11 @@
   "description": "Browser-based 3D flight simulator: 21 aircraft, first-person cockpits, physics, weather, airports, emergencies and rescue.",
   "private": true,
   "scripts": {
-    "build": "esbuild src/main.js --bundle --format=iife --target=es2020 --minify --sourcemap --outfile=dist/flightsim.js",
+    "build": "esbuild src/main.js --bundle --format=iife --target=es2020 --minify --sourcemap --legal-comments=eof --outfile=dist/flightsim.js",
     "dev": "esbuild src/main.js --bundle --format=iife --target=es2020 --sourcemap --outfile=dist/flightsim.js --watch",
     "serve": "node tools/serve.js",
-    "test": "node tests/run-tests.js"
+    "test": "node tests/physics-test.mjs warnings && node tests/physics-test.mjs ground && node tests/physics-test.mjs skylark && node tests/physics-test.mjs h22",
+    "test:browser": "node tests/feature-test.js test-output"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

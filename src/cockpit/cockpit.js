@@ -10,6 +10,7 @@ import { LAYOUTS } from './layouts.js';
 import { settings } from '../core/settings.js';
 import { clamp, damp, DEG, KT, FT, FPM, lerp } from '../core/math.js';
 import { LAYER_OWN } from '../render/renderer.js';
+import { buildModernDeck } from './flightdeck.js';
 
 const TAU = Math.PI * 2;
 
@@ -73,8 +74,13 @@ export class Cockpit {
     this.lightMats = [];     // annunciator materials toggled by state
     this.faceMats = [];
     const pbr = settings.g.pbr;
-    const M = pbr ? THREE.MeshStandardMaterial : THREE.MeshLambertMaterial;
+    // Low preset uses Lambert shading: drop the PBR-only parameters so no warnings are logged
+    const M = pbr ? THREE.MeshStandardMaterial : class extends THREE.MeshLambertMaterial {
+      constructor(p = {}) { const q = { ...p }; delete q.roughness; delete q.metalness; delete q.envMapIntensity; super(q); }
+    };
     this.M = M;
+    this.glowMats = [];      // backlit panel textures (emissive glow maps), brightened at night
+    this.modern = !!this.layout.modern;
     const L = this.layout;
     this.mats = {
       interior: new M({ color: new THREE.Color(L.interior || '#7a7f86'), roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide }),
@@ -95,19 +101,19 @@ export class Cockpit {
     this.buildShell();
     this.buildPanel();
     this.buildControls();
-    this.buildSeats();
+    if (this.modern) {
+      buildModernDeck(this);
+      if (this.layout.controls.fireHandles) this.fireHandles();
+    } else this.buildSeats();
     if (desc.cabin) this.buildCabin();
-    // interior flood light (night) - only affects own-aircraft layer
-    this.flood = new THREE.PointLight(0xffd8a8, 0, 3.5, 1.5);
-    this.flood.position.set(this.eye.x + 0.3, this.eye.y + 0.25, this.eye.z - 0.2);
-    this.flood.layers.set(LAYER_OWN);
-    this.group.add(this.flood);
+    // Soft fill so the interior never goes pitch black. It lives on the own-aircraft layer only, so
+    // it brightens the cockpit pass but never the outside world. Night panel lighting is done with
+    // emissive glow maps instead of point lights (no extra per-pixel lighting cost, no shader
+    // recompiles when switching between inside and outside views).
     this.fill = new THREE.AmbientLight(0xd8e0ea, 0.35);
     this.group.add(this.fill);
     this.group.traverse((o) => { o.layers.set(LAYER_OWN); if (o.isMesh) { o.receiveShadow = settings.g.cockpitShadows; o.castShadow = false; } });
     this.cabin.traverse((o) => o.layers.set(LAYER_OWN));
-    this.flood.layers.enableAll();
-    this.fill.layers.enableAll();
   }
 
   // ------------------------------------------------------------ shell & windows
@@ -195,13 +201,18 @@ export class Cockpit {
     knee.rotation.x = 0.35;
     frame.add(knee);
     // glareshield
-    if (L.glare) {
+    if (L.glare && this.modern) {
+      // hood itself is built by the flight deck module; the flight control panel sits on its lip
+      if (L.glare.mcp && this.ac.ap.available) this.buildMCP(frame, P, true);
+      this.buildMasterLights(frame, P);
+      if (L.glare.hud && this.ac.model.desc.cockpit) this.buildHUD();
+    } else if (L.glare) {
       const g = L.glare;
       const gs = new THREE.Mesh(new THREE.BoxGeometry(P.w + 0.04, 0.035, g.depth), this.mats.glare);
       gs.position.set(0, P.h / 2 + 0.015, -g.depth / 2 + 0.05);
       gs.rotation.x = P.tilt * DEG;
       frame.add(gs);
-      const lip = new THREE.Mesh(new THREE.BoxGeometry(P.w + 0.04, 0.06, 0.03), this.mats.glare);
+      const lip = new THREE.Mesh(new THREE.BoxGeometry(P.w + 0.04, 0.04, 0.03), this.mats.glare);
       lip.position.set(0, P.h / 2 + 0.0, 0.04);
       frame.add(lip);
       if (g.mcp && this.ac.ap.available) this.buildMCP(frame, P);
@@ -315,13 +326,26 @@ export class Cockpit {
   }
 
   // ------------------------------------------------------------ autopilot mode control panel
-  buildMCP(frame, P) {
+  buildMCP(frame, P, onHood = false) {
     const ap = this.ac.ap;
     const g = new THREE.Group();
-    const w = Math.min(0.9, P.w * 0.62), h = 0.07;
-    g.position.set(this.spec.cat === 'heli' ? (this.eye.x * 0) : 0, P.h / 2 + 0.06, 0.02);
-    g.rotation.x = 0.25;
-    frame.add(g);
+    let w = this.spec.cat === 'heli' ? Math.min(0.5, P.w * 0.42) : Math.min(0.9, P.w * 0.62);
+    const h = 0.07;
+    if (onHood) {
+      // modern deck: mounted on the glareshield lip, between the two EFIS control panels
+      w = Math.min(0.9, (this.layout.seatGap || 1) - 0.3);
+      const tilt = P.tilt * DEG, eye = this.eye;
+      const topY = eye.y + P.top - P.h / 2 + (P.h / 2) * Math.cos(tilt);
+      const topZ = eye.z - P.dist - (P.h / 2) * Math.sin(tilt);
+      g.position.set(eye.x + P.cx, topY + 0.012, topZ + 0.05);
+      g.rotation.x = -0.12;
+      this.group.add(g);
+    } else {
+      // sits on the glareshield, centred between the pilots, face tilted towards the crew
+      g.position.set(0, P.h / 2 + 0.03, 0.05);
+      g.rotation.x = 0.55;
+      frame.add(g);
+    }
     g.add(new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.03), this.mats.dark));
     const face = new THREE.Group(); face.position.z = 0.016; g.add(face);
     // digital window
@@ -426,44 +450,62 @@ export class Cockpit {
     // throttles
     const P = this.layout.panel;
     const cx = seats === 2 ? (seatXs[0] + seatXs[1]) / 2 : eye.x;
-    if (C.throttle === 'pedestal') this.pedestal(cx, C);
+    if (C.throttle === 'pedestal' && !this.modern) this.pedestal(cx, C);
     else if (C.throttle === 'knobs' || C.throttle === 'single' || C.throttle === 'quadrant3' || C.throttle === 'quadrant6') this.gaThrottle(cx, C);
     else if (C.throttle === 'sideQuadrant') this.sideQuadrant(eye.x - 0.28);
     // gear lever
     if (C.gear === 'lever' && spec.retract) this.gearLever(C);
-    // switches
-    this.switchPanel(C.switches);
-    if (C.fireHandles) this.fireHandles();
+    // switches (the modern deck builds its own overhead panel)
+    if (!this.modern) {
+      this.switchPanel(C.switches);
+      if (C.fireHandles) this.fireHandles();
+    }
     if (C.engineer) this.engineerPanel();
   }
 
   yoke(sx) {
-    const P = this.layout.panel, eye = this.eye;
+    const P = this.layout.panel, eye = this.eye, L = this.layout;
+    const big = this.spec.cat === 'airliner' || this.spec.cat === 'jet';
+    // wheel centre relative to the eye: roughly 30 degrees below the line of sight, ~0.5 m ahead
+    const wy = eye.y - (this.modern ? 0.42 : big ? 0.33 : 0.28), wz = eye.z - (big ? 0.5 : 0.45);
     const col = new THREE.Group();
-    const base = new THREE.Vector3(sx, eye.y + P.top - P.h * 0.62, eye.z - P.dist + 0.03);
-    col.position.copy(base);
+    col.position.set(sx, wy, wz);
     this.group.add(col);
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.3, 8).rotateX(Math.PI / 2).translate(0, 0, 0.08), this.mats.metal);
-    col.add(shaft);
-    const wheel = new THREE.Group();
-    wheel.position.z = this.spec.cat === 'airliner' ? 0.26 : 0.21;
-    col.add(wheel);
-    const big = this.spec.cat === 'airliner';
-    const yokeW = big ? 0.34 : 0.3;
-    const horn = new THREE.Mesh(new THREE.TorusGeometry(yokeW / 2, 0.014, 8, 20, Math.PI * 0.9).rotateZ(Math.PI * 1.05), this.mats.dark);
-    wheel.add(horn);
-    for (const s of [-1, 1]) {
-      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.11, 8), this.mats.black);
-      grip.position.set(s * yokeW / 2, 0.02, 0);
-      wheel.add(grip);
+    if (big) {
+      // Boeing-style control column rising from the floor
+      const fy = eye.y - (L.floorDrop || 1.05);
+      const h = wy - fy;
+      const column = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, h, 10).translate(0, -h / 2, -0.04), this.mats.dark);
+      column.rotation.x = -0.12;
+      col.add(column);
+      const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.12, 12).translate(0, -h + 0.06, -0.04), this.mats.black);
+      col.add(boot);
+    } else {
+      // GA-style shaft coming out of the instrument panel
+      const len = Math.max(0.12, P.dist - (eye.z - wz) + 0.02);
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, len, 8).rotateX(Math.PI / 2).translate(0, 0, -len / 2), this.mats.metal);
+      col.add(shaft);
     }
-    const hub = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.03), this.mats.dark);
+    const wheel = new THREE.Group();
+    col.add(wheel);
+    const yokeW = big ? 0.36 : 0.3;
+    const horn = new THREE.Mesh(new THREE.TorusGeometry(yokeW / 2, 0.016, 8, 24, Math.PI * 0.9).rotateZ(Math.PI * 1.05), this.mats.dark);
+    wheel.add(horn);
+    for (const sgn of [-1, 1]) {
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.019, 0.12, 8), this.mats.black);
+      grip.position.set(sgn * yokeW / 2, 0.03, 0);
+      wheel.add(grip);
+      const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.01, 8), new THREE.MeshBasicMaterial({ color: 0xc8302a }));
+      btn.position.set(sgn * yokeW / 2, 0.095, 0);
+      wheel.add(btn);
+    }
+    const hub = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.07, 0.035), this.mats.dark);
     wheel.add(hub);
     const fm = this.ac.fm;
     this.addTip(col, 'Control yoke: pull/push = pitch (W/S or arrows), turn = roll (A/D)');
     this.anim.push(() => {
       wheel.rotation.z = -fm.aileron * 0.7;
-      col.position.z = base.z + fm.elevator * 0.07;
+      col.position.z = wz + fm.elevator * 0.07;
     });
   }
 
@@ -672,8 +714,9 @@ export class Cockpit {
     this.anim.push(() => { lv.position.y = fm.ctl.gearDown ? -0.03 : 0.03; });
   }
 
-  switchPanel(kind) {
-    const P = this.layout.panel, frame = this.frame, sys = this.ac.systems, fm = this.ac.fm, ac = this.ac;
+  // [label, tooltip, get, set] for every interactive systems switch of this aircraft
+  switchList() {
+    const sys = this.ac.systems;
     const L = sys.lights;
     const list = [
       ['BATT', 'Battery master', () => sys.battery, (v) => { sys.battery = v; }],
@@ -690,6 +733,12 @@ export class Cockpit {
     ];
     if (this.spec.systems.apu) list.push(['APU', 'Auxiliary power unit start/stop', () => sys.apu.running || sys.apu.starting, (v) => { sys.apu.starting = v; if (!v) { sys.apu.running = false; } sys.apuGen = v; }]);
     if (this.spec.systems.searchlight) list.push(['SRCH', 'Searchlight', () => L.searchlight, (v) => { L.searchlight = v; }]);
+    return list;
+  }
+
+  switchPanel(kind) {
+    const P = this.layout.panel, frame = this.frame, sys = this.ac.systems, fm = this.ac.fm, ac = this.ac;
+    const list = this.switchList();
     if (kind === 'overhead' || kind === 'overheadSmall') {
       // overhead panel on the ceiling
       const eye = this.eye;
@@ -727,10 +776,18 @@ export class Cockpit {
       const tex = labelTex('FIRE ' + (i + 1), 128, 48, '#5a0c0c', '#fff', 22);
       const mat = new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xff2010, emissiveIntensity: 0 });
       const h = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.018, 0.025), mat);
-      h.position.set(-0.08 + i * 0.055 + (n === 4 ? -0.03 : 0), P.h / 2 + 0.035, 0.08);
-      frame.add(h);
+      if (this.modern && this.overhead) {
+        // modern deck: fire handles in a row on the overhead panel
+        h.geometry = new THREE.BoxGeometry(0.06, 0.03, 0.022);
+        h.position.set(0.25 - i * 0.07, 0.115, 0.012);
+        this.overhead.add(h);
+      } else {
+        h.position.set(-0.08 + i * 0.055 + (n === 4 ? -0.03 : 0), P.h / 2 + 0.035, 0.08);
+        frame.add(h);
+      }
       this.addClick(h, 'Fire handle ' + (i + 1), `Engine ${i + 1} fire handle: shuts the engine down and discharges the extinguisher`, () => sys.pullFireHandle(i));
-      this.anim.push((t) => { const e = fm.engines[i]; mat.emissiveIntensity = e.fire && !e.extinguished ? (Math.sin(t * 10) > 0 ? 1.5 : 0.6) : 0; h.position.z = e.fuelCutoff && e.extinguished !== undefined && e.fire === false && e.failed === 'fire' ? 0.1 : 0.08; });
+      const z0 = h.position.z;
+      this.anim.push((t) => { const e = fm.engines[i]; mat.emissiveIntensity = e.fire && !e.extinguished ? (Math.sin(t * 10) > 0 ? 1.5 : 0.6) : 0; h.position.z = z0 + (e.fuelCutoff && e.fire === false && e.failed === 'fire' ? 0.02 : 0); });
     }
   }
 
@@ -850,10 +907,13 @@ export class Cockpit {
     const hz = settings.g.displayHz;
     for (const g of this.gauges) g.userData.update(data);
     // round-robin display redraw: at most 2 canvas uploads per frame
+    // (start index rotates so that no screen is starved when the budget runs out)
     let budget = 2;
-    for (const d of this.displays) {
-      if (budget <= 0) { d.timer = Math.min(d.timer, 0.001); break; }
-      if (d.update(dt, data, hz)) budget--;
+    const n = this.displays.length;
+    this.rr = ((this.rr || 0) + 1) % Math.max(1, n);
+    for (let k = 0; k < n; k++) {
+      const d = this.displays[(this.rr + k) % n];
+      if (budget > 0) { if (d.update(dt, data, hz)) budget--; } else d.timer -= dt;
     }
     for (const f of this.anim) f(t);
     // instrument lighting: dim faces slightly at night with the panel light knob
@@ -861,8 +921,12 @@ export class Cockpit {
     const panel = this.ac.systems.lights.panel;
     const lum = night ? 0.25 + 0.75 * panel * (this.ac.systems.powered ? 1 : 0.2) : 1;
     for (const m of this.faceMats) { if (m.color) m.color.setScalar(lum); }
-    this.flood.intensity = night && this.ac.systems.powered ? 0.35 * panel : 0;
-    this.fill.intensity = 0.06 + 0.32 * (data.night ? 0.1 : 1);
+    // backlit panels: faint by day, glowing at night (panel light knob, needs electrical power)
+    const pw = this.ac.systems.powered ? 1 : 0;
+    const glow = (night ? 0.35 + 0.85 * panel : 0.22) * pw;
+    for (const m of this.glowMats) m.emissiveIntensity = glow;
+    if (this.ledMat) this.ledMat.color.setHex(pw ? (night ? 0x4d8dff : 0x26447e) : 0x0a0e16);
+    this.fill.intensity = 0.06 + 0.32 * (data.night ? 0.1 : 1) + (night ? 0.08 * panel * pw : 0);
   }
 }
 

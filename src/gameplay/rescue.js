@@ -129,6 +129,7 @@ export class RescueResponse {
       this.units.push(unit);
     });
     this.fire = fm.engines.some((e) => e.fire && !e.extinguished) || fm.damage.crashed || fm.damage.total > 0.45;
+    this.hadFire = this.fire; this.sprayTime = 0; this.extinguishedAt = null;
     bus.emit('rescue:dispatched', { onField, airport: onField ? ap.icao : null, units: this.units.length, reason });
   }
 
@@ -161,6 +162,18 @@ export class RescueResponse {
       }
     }
     audio && audio.setSirens(sirens);
+    // fire suppression: sustained water / foam on the aircraft puts out engine and crash fires
+    const spraying = this.units.filter((u) => u.spray && u.spray.material.uniforms.uOn.value > 0.6).length;
+    if (this.fire && spraying) {
+      this.sprayTime = (this.sprayTime || 0) + dt * spraying;
+      if (this.sprayTime > 14) {
+        for (const e of fm.engines) if (e.fire) { e.fire = false; e.extinguished = true; }
+        fm.damage.fireOut = true;
+        this.fire = false;
+        this.extinguishedAt = this.time;
+        bus.emit('toast', 'Fire extinguished');
+      }
+    }
     // people animation
     for (const p of this.people) {
       p.t = (p.t || 0) + dt;
@@ -184,7 +197,7 @@ export class RescueResponse {
     if (!this.completed && arrived === this.units.length && this.time > 20 && this.time - Math.max(...this.units.map((u) => u.arrivedAt || 0)) > 18) {
       this.completed = true;
       const firstArrival = Math.min(...this.units.map((u) => u.arrivedAt || 999));
-      bus.emit('rescue:complete', { responseTime: firstArrival, units: this.units.length, airport: this.airport ? this.airport.icao : null, fire: this.fire });
+      bus.emit('rescue:complete', { responseTime: firstArrival, units: this.units.length, airport: this.airport ? this.airport.icao : null, fire: this.hadFire, extinguished: this.extinguishedAt != null ? this.extinguishedAt - firstArrival : null });
     }
   }
 

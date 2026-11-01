@@ -216,7 +216,7 @@ export function jumbo() {
     ],
     gear: airlinerGear({ yAttach: -2.6, zNose: -25.3, noseLen: gl(-2.6, 0.62, G), noseR: 0.62, xMain: 5.7, zMain: 0.4, mainLen: gl(-2.6, 0.62, G), mainR: 0.62, mainWheels: 4, bogie: 1.5, bodyGear: { x: 1.85, z: 3.6 } }),
     lights: { ...tipLights(W), tail: [0, 1.4, 39.3], beaconTop: [0, 5.9, -14.0], beaconBottom: [0, -3.4, 2.0], landing: [[-4.0, -2.4, -10.1], [4.0, -2.4, -10.1]] },
-    cockpit: { eye: [-0.6, 3.7, -25.0], layout: 'jumbo_glass', seats: 2 },
+    cockpit: { eye: [-0.6, 3.0, -24.8], layout: 'jumbo_glass', seats: 2 },
     cabin: { z0: -22.0, z1: 30.0, rows: 46, abreast: [3, 4, 3], aisle: 0.5, eye: [2.3, 0.4, 2.0], floorY: -1.7 },
     groundY: G,
   };
