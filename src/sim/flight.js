@@ -532,7 +532,7 @@ export class FlightModel {
     // ---- engine power to rotor (freewheel unit)
     let Pavail = 0;
     for (const e of eng) {
-      if (e.constructor.name === 'PistonHeli') e.rotorFrac = this.omega / this.omegaN;
+      if (e.kind === 'pistonHeli') e.rotorFrac = this.omega / this.omegaN;
       Pavail += e.power;
     }
     const omega = Math.max(this.omega, 0.01);

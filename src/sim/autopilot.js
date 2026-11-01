@@ -216,6 +216,15 @@ export class Assists {
     const fm = this.fm, t = fm.telemetry;
     if (apEngaged || !sas || !Number.isFinite(t.pitch)) return;
     const air = t.agl > 1.2 || !fm.onGround;
+    // rotor-speed protection: when the engines can no longer hold rotor rpm (over-pitching), lower
+    // the collective just enough to let the governor recover instead of letting the rotor droop
+    // (only when the engines are genuinely at their power limit, not during a turbine spool-up lag)
+    const pMax = fm.engines.reduce((s2, e) => s2 + (e.running ? (e.P0 || 0) : 0), 0);
+    const pNow = fm.engines.reduce((s2, e) => s2 + (e.running ? Math.max(0, e.power || 0) : 0), 0);
+    this.lowNrT = fm.nr < 0.95 ? (this.lowNrT || 0) + dt : 0;          // sustained droop (piston power falls with rpm)
+    if ((fm.nr < 0.97 && pMax > 0 && pNow > pMax * 0.96) || this.lowNrT > 0.8) {
+      ctl.collective = clamp(ctl.collective - (0.97 - fm.nr) * 3 * dt, 0, 1);
+    }
     // attitude-command / rate-damping SAS
     const p = -fm.w.z / DEG, q = fm.w.x / DEG, r = -fm.w.y / DEG;
     const centred = Math.abs(raw.pitch) < 0.05 && Math.abs(raw.roll) < 0.05;

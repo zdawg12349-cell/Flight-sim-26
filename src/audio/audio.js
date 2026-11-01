@@ -356,13 +356,13 @@ export class AudioEngine {
       const prev = this.prevState[i];
       if (prev !== e.state) {
         if (e.state === 'lightoff' && (e.T0 || e.P0)) this.play('cfm_start', { volume: 0.4 * (inside ? 0.7 : att), bus: 'env', rate: e.T0 ? 1 : 0.8 });
-        if (e.constructor.name === 'Piston' || e.constructor.name === 'PistonHeli') {
+        if (e.kind === 'piston' || e.kind === 'pistonHeli') {
           if (e.state === 'running' && prev === 'cranking') this.play('pist_start', { volume: 0.7 * (inside ? 1 : att), bus: 'env' });
           if (prev === 'running' && e.state !== 'running') this.play('pist_cut', { volume: 0.6 * (inside ? 1 : att), bus: 'env' });
         }
         this.prevState[i] = e.state;
       }
-      if (e.state === 'cranking' && (e.constructor.name === 'Piston' || e.constructor.name === 'PistonHeli')) {
+      if (e.state === 'cranking' && (e.kind === 'piston' || e.kind === 'pistonHeli')) {
         this.crankTimer -= 1 / 30;
         if (this.crankTimer <= 0) { this.crankTimer = 0.32; this.play('pist_crank', { volume: 0.5 * (inside ? 1 : att), bus: 'env', rate: 0.9 + Math.random() * 0.15 }); }
       }

@@ -74,6 +74,8 @@ class EngineBase {
 
 // ------------------------------------------------------------------ Turbofan / turbojet
 export class Turbofan extends EngineBase {
+  // explicit type tag (class names are mangled by the minifier, so never test constructor.name)
+  get kind() { return 'turbofan'; }
   constructor(spec, index) {
     super(spec, index);
     this.T0 = spec.thrustKN * 1000;
@@ -161,6 +163,8 @@ export class Turbofan extends EngineBase {
 
 // ------------------------------------------------------------------ Turboprop (free turbine, constant speed prop)
 export class Turboprop extends EngineBase {
+  // explicit type tag (class names are mangled by the minifier, so never test constructor.name)
+  get kind() { return 'turboprop'; }
   constructor(spec, index) {
     super(spec, index);
     this.P0 = spec.powerKW * 1000;
@@ -231,6 +235,8 @@ export class Turboprop extends EngineBase {
 
 // ------------------------------------------------------------------ Piston engine + propeller
 export class Piston extends EngineBase {
+  // explicit type tag (class names are mangled by the minifier, so never test constructor.name)
+  get kind() { return 'piston'; }
   constructor(spec, index) {
     super(spec, index);
     this.Pmax = spec.powerKW * 1000;
@@ -331,6 +337,8 @@ export class Piston extends EngineBase {
 
 // ------------------------------------------------------------------ Turboshaft (helicopters)
 export class Turboshaft extends EngineBase {
+  // explicit type tag (class names are mangled by the minifier, so never test constructor.name)
+  get kind() { return 'turboshaft'; }
   constructor(spec, index) {
     super(spec, index);
     this.P0 = spec.powerKW * 1000;
@@ -386,6 +394,8 @@ export class Turboshaft extends EngineBase {
 // Engine rpm is mechanically tied to the rotor through the belt drive once the clutch is engaged,
 // so the helicopter model sets `rotorFrac`; the governor sets `powerCmd`.
 export class PistonHeli extends EngineBase {
+  // explicit type tag (class names are mangled by the minifier, so never test constructor.name)
+  get kind() { return 'pistonHeli'; }
   constructor(spec, index) {
     super(spec, index);
     this.P0 = spec.powerKW * 1000;
