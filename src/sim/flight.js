@@ -14,6 +14,7 @@ const _v1 = V3(), _v2 = V3(), _v3 = V3(), _v4 = V3(), _v5 = V3(), _v6 = V3();
 const _q1 = new THREE.Quaternion(), _qi = new THREE.Quaternion();
 const _n = V3();
 const _s1 = V3(), _s2 = V3(), _s3 = V3();
+const _abT = V3(), _abF = V3();       // addBodyForce only
 const UP = new THREE.Vector3(0, 1, 0);
 
 export class FlightModel {
@@ -397,11 +398,11 @@ export class FlightModel {
   }
 
   addBodyForce(fb, pb) {
-    // body-frame force fb applied at body point pb
-    const fw = _v5.copy(fb).applyQuaternion(this.q);
-    this.force.add(fw);
-    const t = _n.copy(pb).cross(fb);
-    this.torque.add(t);
+    // body-frame force fb applied at body point pb. Uses private scratch vectors: callers pass the
+    // shared _v* temporaries as arguments, and reusing one of those here once turned the torque into
+    // (world force x body force), a heading-dependent spurious moment.
+    this.torque.add(_abT.copy(pb).cross(fb));
+    this.force.add(_abF.copy(fb).applyQuaternion(this.q));
   }
 
   updateActuators(dt, sys) {
@@ -559,7 +560,8 @@ export class FlightModel {
       let a1 = this.a1, b1 = this.b1;
       if (h.tandem) {
         // differential collective for pitch, differential lateral tilt for yaw
-        th += (k === 0 ? -1 : 1) * c.pitch * 0.045;
+        // differential collective pitch: aft stick raises the front rotor's pitch and lowers the rear's
+        th += (k === 0 ? 1 : -1) * c.pitch * 0.045;
         a1 = this.a1 * 0.35;
         b1 = this.b1 + (k === 0 ? 1 : -1) * c.yaw * h.cyclic * 0.8;
       }

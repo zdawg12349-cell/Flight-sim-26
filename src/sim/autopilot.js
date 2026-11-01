@@ -157,6 +157,9 @@ export class Assists {
     this.holdPitch = null;
     this.holdHdg = null;
     this.sasAtt = { pitch: 0, bank: 0, hold: false };
+    // helicopter SAS gains (attitude P per degree, rate D per deg/s, authority limit, yaw P/D)
+    this.sasK = { kp: 0.05, kd: 0.04, lim: 0.4, yp: 0.02, yd: 0.05 };
+    this.sasI = { p: 0, r: 0, vF: 0, vR: 0 };   // integral trims: attitude (CG offset) and velocity (hover hold)
   }
   apply(dt, ctl, raw, apEngaged) {
     const a = this.settings.p.assists, fm = this.fm, t = fm.telemetry;
@@ -218,17 +221,29 @@ export class Assists {
     const centred = Math.abs(raw.pitch) < 0.05 && Math.abs(raw.roll) < 0.05;
     if (centred) {
       if (!this.sasAtt.hold) { this.sasAtt.hold = true; this.sasAtt.pitch = Math.max(-8, Math.min(8, t.pitch)); this.sasAtt.bank = 0; }
-      this.sasAtt.pitch = damp(this.sasAtt.pitch, 2, 0.15, dt);
-      ctl.pitch = clamp((this.sasAtt.pitch - t.pitch) * 0.05 - q * 0.05, -0.4, 0.4);
-      ctl.roll = clamp((0 - t.bank) * 0.05 - p * 0.04, -0.4, 0.4);
-      // gentle hover hold at low speed
-      if (t.gs < 4 && air) {
+      // outer loop: at low speed hold position (ground velocity -> attitude target), otherwise
+      // return to a gentle level attitude
+      let pT = 2, bT = 0;
+      const I0 = this.sasI;
+      if (t.gs < 6 && air) {
         const hd = t.heading * DEG;
         const vF = fm.vel.x * Math.sin(hd) + fm.vel.z * -Math.cos(hd);
         const vR = fm.vel.x * Math.cos(hd) + fm.vel.z * Math.sin(hd);
-        ctl.pitch += clamp(vF * 0.06, -0.2, 0.2);
-        ctl.roll += clamp(-vR * 0.06, -0.2, 0.2);
-      }
+        I0.vF = clamp(I0.vF + vF * 0.6 * dt, -6, 6);
+        I0.vR = clamp(I0.vR + vR * 0.6 * dt, -6, 6);
+        pT = 2 + clamp(vF * 2.2 + I0.vF, -10, 10);           // moving forward -> raise the nose to stop
+        bT = clamp(-(vR * 2.2 + I0.vR), -10, 10);            // drifting right -> bank left
+      } else { I0.vF = damp(I0.vF, 0, 0.5, dt); I0.vR = damp(I0.vR, 0, 0.5, dt); }
+      this.sasAtt.pitch = damp(this.sasAtt.pitch, pT, 1.5, dt);
+      this.sasAtt.bank = damp(this.sasAtt.bank, bT, 1.5, dt);
+      // inner loop: attitude P + rate D + slow integral trim (CG offset, wind)
+      const K = this.sasK, I = this.sasI;
+      if (air) {
+        I.p = clamp(I.p + (this.sasAtt.pitch - t.pitch) * 0.03 * dt, -0.35, 0.35);
+        I.r = clamp(I.r + (this.sasAtt.bank - t.bank) * 0.03 * dt, -0.35, 0.35);
+      } else { I.p = damp(I.p, 0, 0.5, dt); I.r = damp(I.r, 0, 0.5, dt); }
+      ctl.pitch = clamp((this.sasAtt.pitch - t.pitch) * K.kp - q * K.kd * 1.25 + I.p, -K.lim - 0.2, K.lim + 0.2);
+      ctl.roll = clamp((this.sasAtt.bank - t.bank) * K.kp - p * K.kd + I.r, -K.lim - 0.2, K.lim + 0.2);
     } else {
       this.sasAtt.hold = false;
       ctl.pitch = clamp(raw.pitch * 0.8 - q * 0.03, -1, 1);
@@ -236,14 +251,19 @@ export class Assists {
     }
     // auto anti-torque + heading hold when pedals centred
     if (!fm.spec.heli.tandem) {
+      // feed-forward: the pedal at which the tail rotor exactly balances the main-rotor torque.
+      // Tail thrust model (flight.js): Ttr = Tmax * nr^2 * (0.44 - 0.56 * pedal), Tmax = 2.25 Qhover / arm,
+      // balance Ttr * arm = 0.98 Qrotor  =>  pedal = (0.44 - 0.98 Qrotor / (2.25 Qhover nr^2)) / 0.56
+      const nrK = Math.max(0.2, (fm.nr || 1) ** 2);
       const need = fm.rotorTorque / Math.max(1, fm.Qhover);
-      const ff = clamp((0.44 - 0.99 * need) / 0.56, -1, 1);          // pedal that balances main rotor torque
+      const ff = clamp((0.44 - 0.98 * need / (2.25 * nrK)) / 0.56, -1, 1);
+      // heading hold / yaw damping: angDiffDeg(a, b) = b - a, r = heading rate (deg/s, + = right)
       if (Math.abs(raw.yaw) < 0.05 && air) {
         if (this.holdHdg === null) this.holdHdg = t.heading;
-        ctl.yaw = clamp(ff - angDiffDeg(t.heading, this.holdHdg) * 0.02 + r * 0.05, -1, 1);
+        ctl.yaw = clamp(ff + angDiffDeg(t.heading, this.holdHdg) * this.sasK.yp - r * this.sasK.yd, -1, 1);
       } else {
         this.holdHdg = null;
-        ctl.yaw = clamp(ff + raw.yaw * 0.7 + r * 0.02, -1, 1);
+        ctl.yaw = clamp(ff + raw.yaw * 0.7 - r * 0.02, -1, 1);
       }
       if (!air) ctl.yaw = clamp(ff + raw.yaw, -1, 1);
     } else {

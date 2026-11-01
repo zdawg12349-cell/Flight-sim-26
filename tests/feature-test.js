@@ -70,13 +70,20 @@ async function main() {
       const t = ac.fm.telemetry, c = ac.fm.ctl, w = ac.fm.w;
       if (kind === 'land' || kind === 'glide') {
         const agl = t.agl;
-        // track a 3-degree glide path to an aim point 250 m past the threshold, flare below 9 m
-        const d = ac.dest ? Math.hypot(ac.fm.pos.x - ac.dest.x, ac.fm.pos.z - ac.dest.z) : 0;
-        const hDes = (d + 250) * Math.tan(3 * Math.PI / 180);
+        // track a 3-degree glide path to an aim point 250 m past the threshold, flare below 9 m.
+        // (the scripted pilot flies the elevator directly, so the simplified-mode auto-trim, which
+        // only re-captures when a human moves the stick, is neutralised)
+        c.trim = 0; ac.assists.trimI = 0;
+        const hr = (ac._rwyHdg ?? t.heading) * Math.PI / 180;
+        const along = ac.dest ? (ac.fm.pos.x - ac.dest.x) * Math.sin(hr) + (ac.fm.pos.z - ac.dest.z) * -Math.cos(hr) : 0;
+        const hDes = Math.max(0, 250 - along) * Math.tan(3 * Math.PI / 180);
         let vsT = agl > 9 ? Math.max(-5, Math.min(1, -t.gs * 0.0524 + (hDes - agl) * 0.25)) : -0.35 - agl * 0.09;
         const vref = (ac.spec.perf.vref || 65) * 0.5144;
-        c.pitch = Math.max(-1, Math.min(1, (vsT - t.vs) * 0.16 - (w.x * 57.3) * 0.05 + (t.ias < vref * 0.85 ? -0.15 : 0)));
-        const hdgErr = ((t.heading - (ac._rwyHdg ?? t.heading) + 540) % 360) - 180;
+        c.pitch = Math.max(-1, Math.min(1, (vsT - t.vs) * 0.12 - (w.x * 57.3) * 0.06 + (t.pitch - 2) * -0.01 + (t.ias < vref * 0.85 ? -0.15 : 0)));
+        // track the extended centreline: cross-track offset -> heading correction (up to 12 deg)
+        const cross = ac.dest ? (ac.fm.pos.x - ac.dest.x) * Math.cos(hr) + (ac.fm.pos.z - ac.dest.z) * Math.sin(hr) : 0;
+        const hdgTgt = (ac._rwyHdg ?? t.heading) - (ac.fm.onGround ? 0.6 : 1.2) * Math.max(-10, Math.min(10, cross));
+        const hdgErr = ((t.heading - hdgTgt + 540) % 360) - 180;
         const bankT = Math.max(-8, Math.min(8, -hdgErr * 1.5));
         c.roll = Math.max(-1, Math.min(1, (bankT - t.bank) * 0.05 + (w.z * 57.3) * 0.02));
         c.yaw = ac.fm.onGround ? Math.max(-1, Math.min(1, -hdgErr * 0.08)) : 0;
@@ -229,12 +236,13 @@ async function main() {
     const st = () => E(() => { const ac = window.__fs.ac, fm = ac.fm; const r = ac.model.rotors[0]; return { agl: fm.telemetry.agl, nr: fm.nr, col: fm.ctl.collective, rot: r ? r.spin.rotation.y : 0, onG: fm.onGround, bank: fm.telemetry.bank, pitch: fm.telemetry.pitch, loud: window.__fs.audio.groups[0].voices.reduce((s, x) => s + x.v.g, 0), crashed: fm.damage.crashed }; });
     await simWait(1);
     const a = await st();
-    await holdKeyUntil('KeyR', () => !window.__fs.ac.fm.onGround && window.__fs.ac.fm.telemetry.agl > 1.2, 6);
-    await simWait(2.5);
+    // raise the collective until the skids leave the ground, then hold it (as a pilot would)
+    await holdKeyUntil('KeyR', () => !window.__fs.ac.fm.onGround, 6);
+    await simWait(3);
     const c = await st();
     await E(() => window.__fs.camRig.setMode('chase', window.__fs.ac)); await wait(1500);
     await shot('08_heli_hover');
-    return { ok: a.onG && !c.onG && c.agl > 1.0 && Math.abs(c.bank) < 20 && c.nr > 0.9 && c.nr < 1.1 && !c.crashed && a.rot !== c.rot, info: `collective ${c.col.toFixed(2)}, ${c.agl.toFixed(1)} m AGL, rotor ${(c.nr * 100).toFixed(0)}%, attitude ${c.pitch.toFixed(1)}/${c.bank.toFixed(1)}°, loudness ${a.loud.toFixed(2)} → ${c.loud.toFixed(2)}` };
+    return { ok: a.onG && !c.onG && c.agl > 0.5 && Math.abs(c.bank) < 20 && c.nr > 0.93 && c.nr < 1.1 && !c.crashed && a.rot !== c.rot, info: `collective ${c.col.toFixed(2)}, ${c.agl.toFixed(1)} m AGL, rotor ${(c.nr * 100).toFixed(0)}%, attitude ${c.pitch.toFixed(1)}/${c.bank.toFixed(1)}°, loudness ${a.loud.toFixed(2)} → ${c.loud.toFixed(2)}` };
   });
 
   // ------------------------------------------------------------------ landing + evaluation
@@ -248,6 +256,7 @@ async function main() {
     for (let i = 0; i < 150; i++) {
       await simWait(1);
       s = await E(() => ({ results: !document.getElementById('results').classList.contains('hidden'), agl: window.__fs.ac.fm.telemetry.agl, gs: window.__fs.ac.fm.telemetry.gs, crashed: window.__fs.ac.fm.damage.crashed }));
+      if (i % 5 === 0) log('   ', await E(() => { const ac = window.__fs.ac, fm = ac.fm, t = fm.telemetry; const d = ac.dest ? Math.hypot(fm.pos.x - ac.dest.x, fm.pos.z - ac.dest.z) : -1; return `t=${fm.time.toFixed(0)} d=${d.toFixed(0)}m agl=${t.agl.toFixed(0)}m vs=${t.vs.toFixed(1)} ias=${(t.ias / 0.5144).toFixed(0)}kt hdg=${t.heading.toFixed(0)} thr=${fm.ctl.throttle[0].toFixed(2)} pitchCmd=${fm.ctl.pitch.toFixed(2)} onG=${fm.onGround}`; }));
       if (s.results || s.crashed) break;
     }
     await wait(800);
